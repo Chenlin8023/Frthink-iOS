@@ -1,8 +1,9 @@
-# Frthink for iOS（重构版）
+# Frthink for iOS（重构版 · 开源）
 
-这是对 Android 应用 **Frthink**（v0.8.210，AI 长篇小说写作应用）的**功能等价 iOS 重构**——
-基于对原 APK 的静态分析（架构见 `../analysis/Frthink-APK-分析报告.md`），以
-Swift / SwiftUI / SwiftData 全新实现，**不含原应用的任何代码或资产**。
+这是对 Android 应用 **Frthink**（AI 长篇小说写作应用）的**功能等价 iOS 重构**——
+以 Swift / SwiftUI / SwiftData 全新实现（clean-room），**不含原应用的任何代码、
+提示词文本、图标或资产**。目标是把原应用的「范围 → 人物 → 语料/事件/文风 →
+梗概 + 规范 + 尾部正文 + 续写大纲 = 新故事」流水线带到 iOS，全程提示词可见可改。
 
 ## 功能对照
 
@@ -27,6 +28,11 @@ Swift / SwiftUI / SwiftData 全新实现，**不含原应用的任何代码或�
 | 逐段翻译（段缓存/只继续未完成/导出译文.txt） | translation_segments | `TranslationView` ✅ |
 | 深色模式/触感反馈 | 外观设置 | `SettingsStore` ✅ |
 | 全量存档导出/导入（JSON 信封） | FrthinkArchiveEnvelope | `ArchiveService`（frthink-archive v1）✅ |
+| 工作范围（章节/自定义区间 → 分析与续写锚定） | 分段处理 | `WorkRangeStore` ✅ |
+| 注入条目开关（人物卡/世界书/语料/规则） | PromptBlockPreference | `ContinuationSheet` ✅ |
+| 全局预设（追加到所有请求 System 末尾） | 全局预设 | `SettingsStore.extraSystemPrompt` ✅ |
+| 提示词/原始回复可见可编辑 + 解析并保存 | 提示词预览 | 各分析 Sheet ✅ |
+| 兼容层（假流式回包兜底/中途错误帧/半截内容保留/4xx 重试） | 兼容重试 | `LlmClient` ✅ |
 | 前台服务长任务 | LlmTransferService | 用 `Task` 前台执行（iOS 无对应服务，长任务可后续接 BGTaskScheduler） |
 | 正文块同步协议/多设备 | BodySync* | 未实现（iOS 版为单机版，存档导入导出替代） |
 
@@ -45,7 +51,16 @@ FrthinkiOS/
     └── Features/                   # 书架/书稿/对话/人物/世界/规则/快照/回收站/设置/翻译
 ```
 
-## 从源码构建 .ipa（需要一台 macOS + Xcode 15+）
+## 从源码构建 .ipa
+
+### 方式一：GitHub Actions（无需本机 macOS）
+
+仓库自带 `.github/workflows/build.yml`：push 到 main 即在 macOS runner 上
+`xcodegen generate` → `xcodebuild CODE_SIGNING_ALLOWED=NO` → 打包**未签名 ipa**
+并上传为 artifact（`Frthink-unsigned-ipa`）。越狱设备（TrollStore / Filza /
+AppSync）可直接安装未签名包；普通设备需自行重签。
+
+### 方式二：本机 macOS + Xcode 15+
 
 > 说明：.ipa 必须由 Xcode 在 macOS 上编译并签名后才能安装到 iPhone；
 > Apple 不允许在 Windows 上直接生成可安装的 .ipa（需要 Apple 签名证书）。
@@ -77,7 +92,9 @@ Xcode → Settings → Accounts 登录 Apple ID → Signing & Capabilities 选�
 ## 法律与版权说明
 
 - 本工程是对原应用**功能与架构的重实现**（功能不受版权保护），
-  未复制原应用的代码、提示词文本、图标或资源文件。
-- "Frthink" 名称与商标归原作者所有；上架前请替换应用名与图标。
+  未复制原应用的代码、提示词文本、图标或资源文件，以 MIT 许可开源（见 `LICENSE`）。
+- **"Frthink" 名称与商标归原作者所有**：本项目为独立的非官方重写，
+  与原作者无关联、未获背书；如原作者提出名称异议，本项目将配合更名。
+- 原版 Android 应用本身仍属其作者，本仓库不包含、也不分发其任何部分。
 - CodeMirror 6（原应用编辑器内核）为 MIT 许可，如需在 iOS 用 WebView 方案
   可自行按 MIT 条款引入。
