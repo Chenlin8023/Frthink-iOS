@@ -33,20 +33,33 @@ final class SettingsStore {
     private let defaults = UserDefaults.standard
 
     init() {
+        // @Observable 属性在 init 内不可读访问器（要求 self 完全初始化）——先算局部量，最后统一赋值
         let saved = (try? JSONDecoder().decode([ApiCredential].self,
                     from: defaults.data(forKey: "credentials") ?? Data())) ?? []
-        self.credentials = saved.isEmpty ? ApiCredential.defaults : saved
-        let activeStr = defaults.string(forKey: "active.credential")
-        self.activeCredentialId = activeStr.flatMap(UUID.init) ?? credentials.first?.id ?? UUID()
-        self.writingModel = defaults.string(forKey: "model.writing") ?? ""
-        self.summaryModel = defaults.string(forKey: "model.summary") ?? ""
-        self.translationModel = defaults.string(forKey: "model.translation") ?? ""
-        self.extractModel = defaults.string(forKey: "model.extract") ?? ""
-        self.contextBudget = defaults.object(forKey: "budget.context") as? Int ?? 6000
-        self.segmentBudget = defaults.object(forKey: "budget.segment") as? Int ?? 3000
-        self.temperature = defaults.object(forKey: "gen.temperature") as? Double ?? 1.0
-        self.maxOutputTokens = defaults.object(forKey: "gen.maxTokens") as? Int ?? 4096
-        self.hapticsEnabled = defaults.object(forKey: "ui.haptics") as? Bool ?? true
+        let creds = saved.isEmpty ? ApiCredential.defaults : saved
+        let activeId = defaults.string(forKey: "active.credential").flatMap(UUID.init)
+            ?? creds.first?.id ?? UUID()
+        let wm = defaults.string(forKey: "model.writing") ?? ""
+        let sm = defaults.string(forKey: "model.summary") ?? ""
+        let tm = defaults.string(forKey: "model.translation") ?? ""
+        let em = defaults.string(forKey: "model.extract") ?? ""
+        let cb = defaults.object(forKey: "budget.context") as? Int ?? 6000
+        let sb = defaults.object(forKey: "budget.segment") as? Int ?? 3000
+        let tp = defaults.object(forKey: "gen.temperature") as? Double ?? 1.0
+        let mt = defaults.object(forKey: "gen.maxTokens") as? Int ?? 4096
+        let hp = defaults.object(forKey: "ui.haptics") as? Bool ?? true
+
+        self.credentials = creds
+        self.activeCredentialId = activeId
+        self.writingModel = wm
+        self.summaryModel = sm
+        self.translationModel = tm
+        self.extractModel = em
+        self.contextBudget = cb
+        self.segmentBudget = sb
+        self.temperature = tp
+        self.maxOutputTokens = mt
+        self.hapticsEnabled = hp
     }
 
     private func saveCredentials() {
