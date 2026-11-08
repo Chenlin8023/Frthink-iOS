@@ -89,6 +89,7 @@ struct ChatView: View {
         streaming = true
         streamContent = ""
         streamThinking = ""
+        errorText = nil
         statusText = "正在生成…可发送停止"
 
         if !instruction.isEmpty {
@@ -152,13 +153,29 @@ struct ChatView: View {
         streaming = false
         statusText = ""
         if finishReason.hasPrefix("error:") {
-            let m = ChatMessage(project: project, role: "assistant", content: finishReason)
-            context.insert(m)
-            try? context.save()
+            // 中断/报错：已收到的半截内容必须保留（对应"气泡消失"问题的修复）
+            let m: ChatMessage
+            if !streamContent.isEmpty {
+                m = ChatMessage(project: project, role: "assistant",
+                                content: streamContent + "\n\n（⚠️ 生成中断：\(finishReason)）")
+                m.thinking = streamThinking
+            } else {
+                m = ChatMessage(project: project, role: "assistant",
+                                content: "生成失败：\(finishReason)")
+            }
+            m.finishReason = finishReason
+            context.insert(m); try? context.save()
             return
         }
-        guard !streamContent.isEmpty else { return }
-        let m = ChatMessage(project: project, role: "assistant", content: streamContent)
+        let truncNote: String
+        switch finishReason {
+        case "content_filter": truncNote = "\n\n（⚠️ 服务端内容过滤，回复被截断）"
+        case "stopped": truncNote = "\n\n（⏹ 已手动停止）"
+        default: truncNote = ""
+        }
+        // 只有思考块没有正文也保存（此前直接丢弃导致"气泡消失"）
+        guard !streamContent.isEmpty || !streamThinking.isEmpty else { return }
+        let m = ChatMessage(project: project, role: "assistant", content: streamContent + truncNote)
         m.thinking = streamThinking
         m.finishReason = finishReason
         context.insert(m)
@@ -385,6 +402,7 @@ struct ContinuationSheet: View {
         guard let preview, let cred = SettingsStore.shared.activeCredential else { return }
         running = true
         result = ""
+        errorText = nil
         var cred2 = cred
         if !SettingsStore.shared.writingModel.isEmpty { cred2.model = SettingsStore.shared.writingModel }
         task = LlmClient.shared.stream(credential: cred2, messages: preview.messages,

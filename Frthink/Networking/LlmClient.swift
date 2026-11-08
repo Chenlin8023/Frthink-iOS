@@ -217,6 +217,15 @@ final class LlmClient {
                     onEvent(LlmStreamEvent(finished: "done"))
                     return
                 }
+                // 服务端中途错误帧（内容过滤/额度等）：data: {"error": {...}} —— 不能当普通空块忽略
+                if payload.hasPrefix("{"),
+                   let obj = (try? JSONSerialization.jsonObject(with: Data(payload.utf8))) as? [String: Any],
+                   obj["error"] != nil {
+                    let msg = (obj["error"] as? [String: Any])?["message"] as? String
+                        ?? String(payload.prefix(200))
+                    onEvent(LlmStreamEvent(finished: "error:服务端中途返回错误：\(msg)"))
+                    return
+                }
                 guard let data = payload.data(using: .utf8),
                       let chunk = try? JSONDecoder().decode(ChatCompletionChunk.self, from: data)
                 else { unparsedLines += 1; continue }

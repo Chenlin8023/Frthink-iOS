@@ -105,6 +105,7 @@ struct RuleInductSheet: View {
 
     private func run() {
         running = true
+        errorText = nil
         guard let cred0 = SettingsStore.shared.activeCredential else { running = false; return }
         var cred = cred0
         let m = SettingsStore.shared.model(for: "extract")
