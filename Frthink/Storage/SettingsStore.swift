@@ -37,7 +37,7 @@ final class SettingsStore {
                     from: defaults.data(forKey: "credentials") ?? Data())) ?? []
         self.credentials = saved.isEmpty ? ApiCredential.defaults : saved
         let activeStr = defaults.string(forKey: "active.credential")
-        self.activeCredentialId = activeStr.flatMap(UUID.init) ?? creds_first_id
+        self.activeCredentialId = activeStr.flatMap(UUID.init) ?? credentials.first?.id ?? UUID()
         self.writingModel = defaults.string(forKey: "model.writing") ?? ""
         self.summaryModel = defaults.string(forKey: "model.summary") ?? ""
         self.translationModel = defaults.string(forKey: "model.translation") ?? ""
@@ -48,8 +48,6 @@ final class SettingsStore {
         self.maxOutputTokens = defaults.object(forKey: "gen.maxTokens") as? Int ?? 4096
         self.hapticsEnabled = defaults.object(forKey: "ui.haptics") as? Bool ?? true
     }
-
-    private var creds_first_id: UUID { credentials.first?.id ?? UUID() }
 
     private func saveCredentials() {
         if let data = try? JSONEncoder().encode(credentials) {
