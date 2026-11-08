@@ -88,7 +88,7 @@ enum PromptBuilder {
         var userText = ""
         if let anchor = project.anchorOffset, project.body.count >= anchor {
             let head = String(project.body.prefix(anchor))
-            userText += "【书稿（锚点之前，只读，用于定位）】\n\(tail.isEmpty ? head.suffix(contextBudget) : tail)\n"
+            userText += "【书稿（锚点之前，只读，用于定位）】\n\(tail.isEmpty ? String(head.suffix(contextBudget)) : tail)\n"
         } else {
             userText += "【书稿结尾（只读上下文）】\n\(tail)\n"
         }

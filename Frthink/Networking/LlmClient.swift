@@ -11,7 +11,10 @@ struct ApiCredential: Identifiable, Codable, Hashable {
 
     var apiKey: String {
         get { KeychainStore.load(key: keyRef) ?? "" }
-        set { _ = newValue.isEmpty ? KeychainStore.delete(key: keyRef) : KeychainStore.save(key: keyRef, value: newValue) }
+        set {
+            if newValue.isEmpty { _ = KeychainStore.delete(key: keyRef) }
+            else { _ = KeychainStore.save(key: keyRef, value: newValue) }
+        }
     }
 
     static let deepseek = ApiCredential(name: "DeepSeek 官方", baseURL: "https://api.deepseek.com", model: "deepseek-chat")
@@ -141,7 +144,7 @@ final class LlmClient {
 
         let body = ChatCompletionRequest(
             model: credential.model, messages: messages,
-            stream: true, temperature: temperature, maxTokens: maxTokens)
+            stream: true, temperature: temperature, max_tokens: maxTokens)
         req.httpBody = try JSONEncoder().encode(body)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: req)
@@ -202,7 +205,7 @@ final class LlmClient {
         let body = ChatCompletionRequest(
             model: credential.model.isEmpty ? "gpt-4o-mini" : credential.model,
             messages: [LlmMessage(role: "user", content: "回复一个字：好")],
-            stream: false, temperature: 0, maxTokens: 8, stream_options: nil)
+            stream: false, temperature: 0, max_tokens: 8, stream_options: nil)
         req.httpBody = try JSONEncoder().encode(body)
         let (data, resp) = try await URLSession.shared.data(for: req)
         guard let http = resp as? HTTPURLResponse else { throw LlmError.badURL }

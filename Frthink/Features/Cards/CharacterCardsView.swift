@@ -214,8 +214,10 @@ struct CharacterOrganizeSheet: View {
                     _ = LlmClient.shared.stream(credential: cred2, messages: compiled.messages,
                                                 temperature: 0.3, maxTokens: 2000) { ev in
                         if !ev.contentDelta.isEmpty { got += ev.contentDelta }
-                        if let f = ev.finished, f != "error:任务已停止" { cont.resume(returning: true) }
-                        else if f?.hasPrefix("error:") == true { cont.resume(returning: false) }
+                        if let f = ev.finished {
+                            if f != "error:任务已停止" { cont.resume(returning: true) }
+                            else if f.hasPrefix("error:") { cont.resume(returning: false) }
+                        }
                     }
                 }
                 guard done, let data = PromptBuilder.extractJSONObject(from: got),

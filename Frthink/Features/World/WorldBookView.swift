@@ -195,7 +195,7 @@ struct CorpusCollectSheet: View {
             if ev.finished != nil {
                 DispatchQueue.main.async {
                     for line in acc.split(separator: "\n") {
-                        let t = line.trimmingCharacters(in: "- • ").trimmingCharacters(in: .whitespaces)
+                        let t = line.trimmingCharacters(in: CharacterSet(charactersIn: "- • ")).trimmingCharacters(in: .whitespaces)
                         if t.isEmpty || t.contains("NO_ADDITIONS") { continue }
                         context.insert(CorpusEntry(project: project, content: t, sourceRange: "正文尾部"))
                         collected += 1
@@ -327,7 +327,8 @@ struct EventExtractSheet: View {
         var acc = ""
         task = LlmClient.shared.stream(credential: cred, messages: compiled.messages, temperature: 0.3) { ev in
             if !ev.contentDelta.isEmpty { acc += ev.contentDelta }
-            if let f = ev.finished, !f.hasPrefix("error:") {
+            if let f = ev.finished {
+                if !f.hasPrefix("error:") {
                 DispatchQueue.main.async {
                     raw = acc
                     if let data = PromptBuilder.extractJSONObject(from: acc),
@@ -347,8 +348,9 @@ struct EventExtractSheet: View {
                     try? context.save()
                     running = false
                 }
-            } else if f != nil {
-                DispatchQueue.main.async { running = false }
+                } else {
+                    DispatchQueue.main.async { running = false }
+                }
             }
         }
     }
