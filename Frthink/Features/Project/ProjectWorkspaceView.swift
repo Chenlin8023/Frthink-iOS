@@ -172,52 +172,61 @@ struct ProjectWorkspaceView: View {
     private var chapterNavSheet: some View {
         NavigationStack {
             List {
-                let chapters = PromptBuilder.chapterRanges(in: project.body)
-                if chapters.isEmpty {
-                    Text("没有识别到章节标题").foregroundStyle(.secondary)
-                }
-                Section("点击章节：设定分析范围 / 锚定续写位置") {
-                    ForEach(Array(chapters.enumerated()), id: \.offset) { i, ch in
-                        let end = i + 1 < chapters.count ? chapters[i + 1].offset : project.body.count
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(ch.title)
-                            Text("第 \(ch.offset)–\(end) 字 · 约 \(end - ch.offset) 字")
-                                .font(.caption).foregroundStyle(.secondary)
-                            HStack {
-                                Button {
-                                    WorkRangeStore.set(WorkRange(start: ch.offset, end: end), for: project)
-                                    rangeTick += 1
-                                } label: {
-                                    Label("设为分析范围", systemImage: "text.magnifyingglass")
-                                        .font(.caption)
-                                }
-                                .buttonStyle(.bordered)
-                                Button {
-                                    project.anchorOffset = ch.offset
-                                    try? context.save()
-                                    rangeTick += 1
-                                } label: {
-                                    Label("锚定续写", systemImage: "anchor")
-                                        .font(.caption)
-                                }
-                                .buttonStyle(.bordered)
-                            }
-                        }
-                    }
-                }
-                Section {
-                    Text("当前分析范围：\(WorkRangeStore.label(for: project))")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if let a = project.anchorOffset {
-                        Text("当前续写锚：第 \(a) 字").font(.caption).foregroundStyle(.secondary)
-                    }
-                }
+                chapterNavSections
             }
             .navigationTitle("章节导航")
             .id(rangeTick)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showChapterNav = false } } }
         }
         .presentationDetents([.large])
+    }
+
+    @ViewBuilder
+    private var chapterNavSections: some View {
+        let chapters = PromptBuilder.chapterRanges(in: project.body)
+        if chapters.isEmpty {
+            Text("没有识别到章节标题").foregroundStyle(.secondary)
+        }
+        Section("点击章节：设定分析范围 / 锚定续写位置") {
+            ForEach(Array(chapters.enumerated()), id: \.offset) { pair in
+                let next = pair.offset + 1 < chapters.count ? chapters[pair.offset + 1].offset : project.body.count
+                chapterRow(title: pair.element.title, start: pair.element.offset, end: next)
+            }
+        }
+        Section {
+            Text("当前分析范围：\(WorkRangeStore.label(for: project))")
+                .font(.caption).foregroundStyle(.secondary)
+            if let a = project.anchorOffset {
+                Text("当前续写锚：第 \(a) 字").font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func chapterRow(title: String, start: Int, end: Int) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+            Text("第 \(start)–\(end) 字 · 约 \(end - start) 字")
+                .font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button {
+                    WorkRangeStore.set(WorkRange(start: start, end: end), for: project)
+                    rangeTick += 1
+                } label: {
+                    Label("设为分析范围", systemImage: "text.magnifyingglass")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                Button {
+                    project.anchorOffset = start
+                    try? context.save()
+                    rangeTick += 1
+                } label: {
+                    Label("锚定续写", systemImage: "anchor")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
     }
 
     private var importSheet: some View {
