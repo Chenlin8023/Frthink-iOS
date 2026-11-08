@@ -1,0 +1,50 @@
+name: Build unsigned ipa
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build (Release, device, unsigned)
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Frthink.xcodeproj \
+            -scheme Frthink \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=YES \
+            -quiet
+
+      - name: Package unsigned ipa
+        run: |
+          set -euo pipefail
+          APP="build/Build/Products/Release-iphoneos/Frthink.app"
+          test -d "$APP" || { echo "Frthink.app not found"; ls build/Build/Products; exit 1; }
+          rm -rf Payload Frthink-unsigned.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry Frthink-unsigned.ipa Payload
+          ls -la Frthink-unsigned.ipa
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Frthink-unsigned-ipa
+          path: Frthink-unsigned.ipa
+          if-no-files-found: error
