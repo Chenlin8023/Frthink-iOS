@@ -15,6 +15,8 @@ struct BookshelfView: View {
     @State private var newSynopsis = ""
     @State private var showImporter = false
     @State private var importMessage: String?
+    @State private var showSettings = false
+    @State private var showTrash = false
 
     var body: some View {
         // 根栈由 RootView 提供（避免与工作台 TabView 叠成双层标签栏）
@@ -55,8 +57,8 @@ struct BookshelfView: View {
             .searchable(text: $searchText, prompt: "搜索书名")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
-                    NavigationLink { TrashView() } label: { Image(systemName: "trash") }
+                    Button { showSettings = true } label: { Image(systemName: "gearshape") }
+                    Button { showTrash = true } label: { Image(systemName: "trash") }
                     Menu {
                         Button("新建书目", systemImage: "plus.circle") { showNewSheet = true }
                         Button("导入存档 (.json)", systemImage: "square.and.arrow.down") { showImporter = true }
@@ -72,6 +74,9 @@ struct BookshelfView: View {
             .alert("导入结果", isPresented: .init(get: { importMessage != nil }, set: { _ in importMessage = nil })) {
                 Button("好", role: .cancel) {}
             } message: { Text(importMessage ?? "") }
+            // 设置/回收站以全屏弹出打开（自带导航栈）——不从 searchable 根栈 push，规避 iOS 17 推入卡死
+            .fullScreenCover(isPresented: $showSettings) { SettingsView(showsDone: true) }
+            .fullScreenCover(isPresented: $showTrash) { ModalPage { TrashView() } }
     }
 
     private var filtered: [BookProject] {

@@ -9,27 +9,39 @@ struct SettingsView: View {
     @AppStorage("appearance.mode") private var appearanceMode = "system"
     @State private var showCredentialEditor = false
     @State private var editingCred: ApiCredential?
+    /// 以全屏弹出方式展示时显示「完成」关闭按钮
+    var showsDone: Bool = false
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        // 由书架页的根 NavigationStack 推入（不再自带栈，避免嵌套）
-        List {
-            Section("帮助") {
-                NavigationLink {
-                    HelpView()
-                } label: {
-                    Label("使用教程（先看这个）", systemImage: "questionmark.circle")
+        // 自带导航栈（栈根渲染，v1.0/v1.1 实测正常；避免从书架根栈推入——iOS 17 searchable 根栈 + push 会卡死）
+        NavigationStack {
+            List {
+                Section("帮助") {
+                    NavigationLink {
+                        HelpView()
+                    } label: {
+                        Label("使用教程（先看这个）", systemImage: "questionmark.circle")
+                    }
+                }
+                credentialSection
+                modelSection
+                budgetSection
+                usageSection
+                appearanceSection
+                archiveSection
+            }
+            .navigationTitle("设置")
+            .toolbar {
+                if showsDone {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button("完成") { dismiss() }
+                    }
                 }
             }
-            credentialSection
-            modelSection
-            budgetSection
-            usageSection
-            appearanceSection
-            archiveSection
-        }
-        .navigationTitle("设置")
-        .sheet(isPresented: $showCredentialEditor) {
-            CredentialEditorSheet(credentials: $settings.credentials, credential: editingCred)
+            .sheet(isPresented: $showCredentialEditor) {
+                CredentialEditorSheet(credentials: $settings.credentials, credential: editingCred)
+            }
         }
     }
 
