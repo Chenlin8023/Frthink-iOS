@@ -76,6 +76,7 @@ struct RuleInductSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var running = false
     @State private var added = 0
+    @State private var errorText: String?
     @State private var task: Task<Void, Never>?
 
     var body: some View {
@@ -89,6 +90,10 @@ struct RuleInductSheet: View {
                     Text(added == 0 ? "从正文归纳可迁移的写作规则（只增不减）" : "已归纳 \(added) 条规则")
                     Button("开始归纳") { run() }.buttonStyle(.borderedProminent)
                         .disabled(project.body.isEmpty)
+                }
+                if let errorText {
+                    Text(errorText).font(.caption).foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
                 }
                 Spacer()
             }
@@ -124,7 +129,7 @@ struct RuleInductSheet: View {
                     running = false
                 }
                 } else {
-                    DispatchQueue.main.async { running = false }
+                    DispatchQueue.main.async { running = false; errorText = f }
                 }
             }
         }

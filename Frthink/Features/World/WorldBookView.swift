@@ -152,6 +152,7 @@ struct CorpusCollectSheet: View {
     @State private var running = false
     @State private var progress = ""
     @State private var collected = 0
+    @State private var errorText: String?
     @State private var task: Task<Void, Never>?
 
     var body: some View {
@@ -166,6 +167,10 @@ struct CorpusCollectSheet: View {
                     Text(collected == 0 ? "从正文中收集设定事实到语料库" : "已收集 \(collected) 条语料")
                     Button("开始收集") { run() }.buttonStyle(.borderedProminent)
                         .disabled(project.body.isEmpty)
+                }
+                if let errorText {
+                    Text(errorText).font(.caption).foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
                 }
                 Spacer()
             }
@@ -193,15 +198,19 @@ struct CorpusCollectSheet: View {
         var acc = ""
         task = LlmClient.shared.stream(credential: cred, messages: messages, temperature: 0.3) { ev in
             if !ev.contentDelta.isEmpty { acc += ev.contentDelta }
-            if ev.finished != nil {
+            if let f = ev.finished {
                 DispatchQueue.main.async {
-                    for line in acc.split(separator: "\n") {
-                        let t = line.trimmingCharacters(in: CharacterSet(charactersIn: "- • ")).trimmingCharacters(in: .whitespaces)
-                        if t.isEmpty || t.contains("NO_ADDITIONS") { continue }
-                        context.insert(CorpusEntry(project: project, content: t, sourceRange: "正文尾部"))
-                        collected += 1
+                    if f.hasPrefix("error:") {
+                        errorText = f
+                    } else {
+                        for line in acc.split(separator: "\n") {
+                            let t = line.trimmingCharacters(in: CharacterSet(charactersIn: "- • ")).trimmingCharacters(in: .whitespaces)
+                            if t.isEmpty || t.contains("NO_ADDITIONS") { continue }
+                            context.insert(CorpusEntry(project: project, content: t, sourceRange: "正文尾部"))
+                            collected += 1
+                        }
+                        try? context.save()
                     }
-                    try? context.save()
                     running = false
                 }
             }
@@ -288,11 +297,13 @@ struct EventExtractSheet: View {
     @State private var running = false
     @State private var added = 0
     @State private var raw = ""
+    @State private var errorText: String?
     @State private var task: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
+                if project.body.isEmpty { EmptyBodyHint() }
                 if running {
                     ProgressView(); Text("正在提取…")
                     Button("停止", role: .destructive) { task?.cancel() }
@@ -302,6 +313,10 @@ struct EventExtractSheet: View {
                         Text(raw).font(.caption2).foregroundStyle(.secondary).lineLimit(8)
                     }
                     Button("开始提取") { run() }.buttonStyle(.borderedProminent)
+                }
+                if let errorText {
+                    Text(errorText).font(.caption).foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
                 }
                 Spacer()
             }
@@ -345,7 +360,7 @@ struct EventExtractSheet: View {
                     running = false
                 }
                 } else {
-                    DispatchQueue.main.async { running = false }
+                    DispatchQueue.main.async { running = false; errorText = f }
                 }
             }
         }

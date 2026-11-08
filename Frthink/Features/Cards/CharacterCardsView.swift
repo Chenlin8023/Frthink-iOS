@@ -215,8 +215,15 @@ struct CharacterOrganizeSheet: View {
                                                 temperature: 0.3, maxTokens: 2000) { ev in
                         if !ev.contentDelta.isEmpty { got += ev.contentDelta }
                         if let f = ev.finished {
-                            if f != "error:任务已停止" { cont.resume(returning: true) }
-                            else if f.hasPrefix("error:") { cont.resume(returning: false) }
+                            if f == "error:任务已停止" {
+                                Task { await MainActor.run { log.append("⏹ 已停止") } }
+                                cont.resume(returning: false)
+                            } else if f.hasPrefix("error:") {
+                                Task { await MainActor.run { log.append("❌ \(f)") } }
+                                cont.resume(returning: false)
+                            } else {
+                                cont.resume(returning: true)
+                            }
                         }
                     }
                 }

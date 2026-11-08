@@ -10,6 +10,7 @@ struct ChatView: View {
     @State private var streamContent = ""
     @State private var streamThinking = ""
     @State private var statusText = ""
+    @State private var errorText: String?
     @State private var streamTask: Task<Void, Never>?
     @State private var showPromptPreview = false
     @State private var pendingInstruction = ""
@@ -39,6 +40,10 @@ struct ChatView: View {
                 }
             }
 
+            if let errorText {
+                Text(errorText).font(.caption).foregroundStyle(.red)
+                    .padding(.horizontal)
+            }
             HStack(alignment: .bottom, spacing: 8) {
                 Button {
                     pendingInstruction = "从书稿结尾之后继续写下去。"
@@ -136,6 +141,7 @@ struct ChatView: View {
                                                outputTokens: usage.output, cachedTokens: usage.cached))
                 }
                 if let fin = ev.finished {
+                    if fin.hasPrefix("error:") { errorText = fin }
                     finishStreaming(finishReason: fin)
                 }
             }
@@ -283,6 +289,7 @@ struct ContinuationSheet: View {
     @State private var thinking = ""
     @State private var running = false
     @State private var task: Task<Void, Never>?
+    @State private var errorText: String?
     @State private var applyMode: ApplyMode = .append
 
     enum ApplyMode: String, CaseIterable { case append = "追加到正文"; case replaceTail = "从锚点替换"; case chatOnly = "仅保存在气泡" }
@@ -305,6 +312,10 @@ struct ContinuationSheet: View {
                     if !result.isEmpty {
                         Text(result).textSelection(.enabled).padding(8)
                             .background(Color(.secondarySystemBackground)).cornerRadius(8)
+                    }
+                    if let errorText {
+                        Text(errorText).font(.caption).foregroundStyle(.red)
+                            .padding(8).background(Color.red.opacity(0.08)).cornerRadius(8)
                     }
                 }
                 .padding()
@@ -382,7 +393,10 @@ struct ContinuationSheet: View {
             DispatchQueue.main.async {
                 if !ev.contentDelta.isEmpty { result += ev.contentDelta }
                 if !ev.thinkingDelta.isEmpty { thinking += ev.thinkingDelta }
-                if ev.finished != nil { running = false }
+                if let fin = ev.finished {
+                    if fin.hasPrefix("error:") { errorText = fin }
+                    running = false
+                }
             }
         }
     }

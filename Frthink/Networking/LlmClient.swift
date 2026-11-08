@@ -69,6 +69,21 @@ struct ChatCompletionChunk: Decodable {
     var usage: Usage?
 }
 
+struct NonStreamResponse: Decodable {
+    struct Choice: Decodable {
+        struct Msg: Decodable { var content: String?; var reasoning_content: String? }
+        var message: Msg?
+    }
+    struct Usage: Decodable {
+        struct PromptDetails: Decodable { var cached_tokens: Int? }
+        var prompt_tokens: Int?
+        var completion_tokens: Int?
+        var prompt_tokens_details: PromptDetails?
+    }
+    var choices: [Choice]?
+    var usage: Usage?
+}
+
 struct LlmStreamEvent {
     var contentDelta: String = ""
     var thinkingDelta: String = ""
@@ -80,12 +95,16 @@ enum LlmError: LocalizedError {
     case badURL
     case http(Int, String)
     case cancelled
+    case emptyModel
+    case streamParse(String)
 
     var errorDescription: String? {
         switch self {
         case .badURL: return "服务地址无效"
         case .http(let code, let body): return "服务返回 HTTP \(code)\n详情=\(body.prefix(300))"
         case .cancelled: return "任务已停止"
+        case .emptyModel: return "模型名未填写：请到「设置 → 凭证管理」编辑凭证填写模型（如 deepseek-chat）"
+        case .streamParse(let s): return "流式响应无法解析（服务端可能不支持 stream:true）\n返回片段=\(s)"
         }
     }
 }
@@ -132,6 +151,29 @@ final class LlmClient {
         maxTokens: Int?,
         onEvent: @escaping (LlmStreamEvent) -> Void
     ) async throws {
+        let model = credential.model.trimmingCharacters(in: .whitespaces)
+        guard !model.isEmpty else { throw LlmError.emptyModel }
+        do {
+            try await runOnce(credential: credential, model: model, messages: messages,
+                              temperature: temperature, maxTokens: maxTokens,
+                              includeStreamOptions: true, onEvent: onEvent)
+        } catch LlmError.http(let code, _) where (400...499).contains(code) {
+            // 兼容模式重试（对应 Android: 兼容重试）——部分服务不接受 stream_options 字段
+            try await runOnce(credential: credential, model: model, messages: messages,
+                              temperature: temperature, maxTokens: maxTokens,
+                              includeStreamOptions: false, onEvent: onEvent)
+        }
+    }
+
+    private func runOnce(
+        credential: ApiCredential,
+        model: String,
+        messages: [LlmMessage],
+        temperature: Double?,
+        maxTokens: Int?,
+        includeStreamOptions: Bool,
+        onEvent: @escaping (LlmStreamEvent) -> Void
+    ) async throws {
         guard let url = URL(string: credential.baseURL.trimmingCharacters(in: .whitespaces)
             .appending("/chat/completions")) else { throw LlmError.badURL }
 
@@ -142,23 +184,28 @@ final class LlmClient {
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("text/event-stream, application/json", forHTTPHeaderField: "Accept")
 
-        let body = ChatCompletionRequest(
-            model: credential.model, messages: messages,
+        var body = ChatCompletionRequest(
+            model: model, messages: messages,
             stream: true, temperature: temperature, max_tokens: maxTokens)
+        if !includeStreamOptions { body.stream_options = nil }
         req.httpBody = try JSONEncoder().encode(body)
 
         let (bytes, response) = try await URLSession.shared.bytes(for: req)
         guard let http = response as? HTTPURLResponse else { throw LlmError.badURL }
         guard (200..<300).contains(http.statusCode) else {
-            var body = Data()
-            for try await b in bytes { body.append(b) }
-            throw LlmError.http(http.statusCode, String(data: body, encoding: .utf8) ?? "")
+            var err = Data()
+            for try await b in bytes.prefix(4096) { err.append(b) }
+            throw LlmError.http(http.statusCode, String(data: err, encoding: .utf8) ?? "")
         }
 
-        // 按行缓冲解码（保证多字节 UTF-8 中文不被逐字节截断）
+        // 按行缓冲解码（保证多字节 UTF-8 中文不被逐字节截断）；同时累计原文用于兼容模式兜底
+        var bodyData = Data()
         var lineBytes = [UInt8]()
+        var sawDataEvent = false
+        var unparsedLines = 0
         for try await byte in bytes {
             if Task.isCancelled { throw CancellationError() }
+            bodyData.append(byte)
             if byte == 0x0A { // '\n'
                 defer { lineBytes.removeAll(keepingCapacity: true) }
                 guard let line = String(bytes: lineBytes, encoding: .utf8)?
@@ -172,7 +219,7 @@ final class LlmClient {
                 }
                 guard let data = payload.data(using: .utf8),
                       let chunk = try? JSONDecoder().decode(ChatCompletionChunk.self, from: data)
-                else { continue }
+                else { unparsedLines += 1; continue }
                 var ev = LlmStreamEvent()
                 if let delta = chunk.choices?.first?.delta {
                     ev.contentDelta = delta.content ?? ""
@@ -183,6 +230,8 @@ final class LlmClient {
                     ev.usage = (u.prompt_tokens ?? 0, u.completion_tokens ?? 0,
                                 u.prompt_tokens_details?.cached_tokens ?? 0)
                 }
+                if !ev.contentDelta.isEmpty || !ev.thinkingDelta.isEmpty
+                    || ev.finished != nil || ev.usage != nil { sawDataEvent = true }
                 onEvent(ev)
             } else {
                 if byte != 0x0D { // 忽略 '\r'
@@ -190,7 +239,32 @@ final class LlmClient {
                 }
             }
         }
-        onEvent(LlmStreamEvent(finished: "done"))
+
+        // 流正常结束：若没解析出任何 SSE 事件——大概率服务端无视 stream:true 回了一份普通 JSON（兼容模式）
+        if sawDataEvent {
+            onEvent(LlmStreamEvent(finished: "done"))
+            return
+        }
+        if let wrap = try? JSONDecoder().decode(NonStreamResponse.self, from: bodyData),
+           let msg = wrap.choices?.first?.message {
+            let content = msg.content ?? ""
+            let reasoning = msg.reasoning_content ?? ""
+            if !content.isEmpty || !reasoning.isEmpty {
+                var ev = LlmStreamEvent()
+                ev.contentDelta = content
+                ev.thinkingDelta = reasoning
+                if let u = wrap.usage {
+                    ev.usage = (u.prompt_tokens ?? 0, u.completion_tokens ?? 0,
+                                u.prompt_tokens_details?.cached_tokens ?? 0)
+                }
+                onEvent(ev)
+                onEvent(LlmStreamEvent(finished: "done"))
+                return
+            }
+        }
+        let snippet = String(data: bodyData.prefix(300), encoding: .utf8) ?? "（非 UTF-8 文本）"
+        let note = unparsedLines > 0 ? "（\(unparsedLines) 行无法按数据块解析）" : ""
+        throw LlmError.streamParse("HTTP 200 但没有有效流式数据\(note)。返回片段：\(snippet)")
     }
 
     /// 非流式测试连接（对应 UI："测试连接"/"实测"）
@@ -202,8 +276,10 @@ final class LlmClient {
         req.timeoutInterval = 60
         req.setValue("Bearer \(credential.apiKey)", forHTTPHeaderField: "Authorization")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let model = credential.model.trimmingCharacters(in: .whitespaces)
+        guard !model.isEmpty else { throw LlmError.emptyModel }
         let body = ChatCompletionRequest(
-            model: credential.model.isEmpty ? "gpt-4o-mini" : credential.model,
+            model: model,
             messages: [LlmMessage(role: "user", content: "回复一个字：好")],
             stream: false, temperature: 0, max_tokens: 8, stream_options: nil)
         req.httpBody = try JSONEncoder().encode(body)

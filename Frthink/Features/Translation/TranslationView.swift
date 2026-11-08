@@ -16,6 +16,7 @@ struct TranslationView: View {
         let source: String
         var translation: String = ""
         var status: String = ""   // "" | 处理中 | 完成 | 失败
+        var note: String = ""     // 失败原因
         var sourceHash: Int
     }
 
@@ -52,6 +53,9 @@ struct TranslationView: View {
                     Text(seg.source).font(.caption).lineLimit(4).foregroundStyle(.secondary)
                     if !seg.translation.isEmpty {
                         Text(seg.translation).font(.subheadline)
+                    }
+                    if !seg.note.isEmpty {
+                        Text(seg.note).font(.caption2).foregroundStyle(.red)
                     }
                 }
             }
@@ -97,12 +101,13 @@ struct TranslationView: View {
                 let compiled = PromptBuilder.compileTranslation(segment: segments[i].source, target: targetLang)
                 var acc = ""
                 var ok = false
+                var errNote = ""
                 await withCheckedContinuation { cont in
                     _ = LlmClient.shared.stream(credential: cred, messages: compiled.messages,
                                                 temperature: 0.2, maxTokens: 4096) { ev in
                         if !ev.contentDelta.isEmpty { acc += ev.contentDelta }
                         if let f = ev.finished {
-                            if f.hasPrefix("error:") { ok = false } else { ok = true }
+                            if f.hasPrefix("error:") { ok = false; errNote = f } else { ok = true }
                             cont.resume()
                         }
                     }
@@ -110,6 +115,7 @@ struct TranslationView: View {
                 await MainActor.run {
                     segments[i].translation = acc.trimmingCharacters(in: .whitespacesAndNewlines)
                     segments[i].status = ok ? "完成" : "失败"
+                    segments[i].note = ok ? "" : String(errNote.prefix(160))
                 }
             }
             await MainActor.run { running = false }
