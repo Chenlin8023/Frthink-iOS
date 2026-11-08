@@ -110,19 +110,28 @@ struct TextImportSheet: View {
                     }
                 } else {
                     ContentUnavailableView("导入正文", systemImage: "doc.badge.plus",
-                                           description: Text("支持 .txt / .md 纯文本文件\n自动识别 UTF-8 与 GBK（GB18030）编码"))
+                                           description: Text("选择任意文件即可（推荐 .txt / .md）\n自动识别 UTF-8 / UTF-16 / GBK 编码"))
                     Button("选择文件") { showImporter = true }
                         .buttonStyle(.borderedProminent)
                 }
                 if let error { Text(error).foregroundStyle(.red).font(.caption) }
             }
             .padding()
+            // 注意：这里必须用 .data 放行——微信/QQ/网盘传出的 .txt 常被系统标记为 public.data
+            // （不符合 public.plain-text），按 .plainText/.text 过滤会被文件选择器置灰无法选中
             .fileImporter(isPresented: $showImporter,
-                          allowedContentTypes: [.plainText, .text, UTType(filenameExtension: "md") ?? .text]) { result in
+                          allowedContentTypes: [.data]) { result in
                 guard case .success(let url) = result else { return }
                 do {
                     let accessing = url.startAccessingSecurityScopedResource()
                     defer { if accessing { url.stopAccessingSecurityScopedResource() } }
+                    let ext = url.pathExtension.lowercased()
+                    let binaryExts: Set<String> = ["doc", "docx", "pdf", "epub", "mobi", "azw3",
+                                                   "jpg", "jpeg", "png", "gif", "zip", "rar", "7z"]
+                    if binaryExts.contains(ext) {
+                        error = "「.\(ext)」是二进制格式，请先转成 .txt 再导入"
+                        return
+                    }
                     let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
                     if size > 300 * 1024 * 1024 {
                         error = "文件超过 300 MiB"
@@ -130,7 +139,7 @@ struct TextImportSheet: View {
                     }
                     let data = try Data(contentsOf: url)
                     guard let text = Self.decode(data) else {
-                        error = "无法识别文件编码（已尝试 UTF-8 / GB18030）"
+                        error = "无法识别文件编码（已尝试 UTF-8 / UTF-16 / GB18030）"
                         return
                     }
                     preview = text
@@ -152,7 +161,7 @@ struct TextImportSheet: View {
         }
     }
 
-    /// UTF-8 优先，失败回退 GB18030（Windows 记事本导出的中文小说常见 GBK）
+    /// UTF-8 优先；大量 0x00 字节 → 无 BOM 的 UTF-16；失败回退 GB18030（Windows 记事本导出的中文小说常见 GBK）
     static func decode(_ data: Data) -> String? {
         var d = data
         // 去 BOM
@@ -160,6 +169,12 @@ struct TextImportSheet: View {
         if d.starts(with: [0xFF, 0xFE]) { return String(data: d, encoding: .utf16LittleEndian) }
         if d.starts(with: [0xFE, 0xFF]) { return String(data: d, encoding: .utf16BigEndian) }
         if let s = String(data: d, encoding: .utf8) { return s }
+        let sample = d.prefix(4096)
+        let zeros = sample.filter { $0 == 0 }.count
+        if !sample.isEmpty && Double(zeros) / Double(sample.count) > 0.3 {
+            if let s = String(data: d, encoding: .utf16LittleEndian) { return s }
+            if let s = String(data: d, encoding: .utf16BigEndian) { return s }
+        }
         let gb = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
             CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
         if let s = String(data: d, encoding: gb) { return s }
