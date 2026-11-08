@@ -26,7 +26,7 @@ struct HelpView: View {
     var body: some View {
         List {
             Section("第一次使用（3 步出稿）") {
-                step(1, "配置模型密钥", "设置 → 凭证管理 → 点当前凭证 → 「编辑凭证」→ 填 API Key → 「测试连接」。预置 DeepSeek 官方 / OpenRouter，也可自定义 OpenAI 兼容地址。")
+                step(1, "配置模型密钥", "我的书架右上角齿轮 ⚙ 进入设置 → 凭证管理 → 长按当前凭证 → 「编辑凭证」→ 填 API Key → 「测试连接」。预置 DeepSeek 官方 / OpenRouter，也可自定义 OpenAI 兼容地址。")
                 step(2, "新建书目", "「我的书架」→ 右上角 + → 新建书目（填书名，梗概可选）。")
                 step(3, "导入正文 / 开始写作", "进入书 → 「书稿」页 → 右上角导入图标选 .txt/.md（GBK、UTF-8 都支持），或直接粘贴/输入。空白书也可以直接点「续写」让 AI 起稿。")
             }

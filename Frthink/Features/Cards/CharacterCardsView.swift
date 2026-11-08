@@ -2,12 +2,14 @@ import SwiftUI
 import SwiftData
 
 /// 人物卡库（对应 Android: CharacterLibrary / 编组 / 人物整理增量提取）
+/// 注意：导航栏按钮（✨ 整理 / ＋ 新建）由 ProjectWorkspaceView 统一声明（iOS 17 子视图导航栏项会被丢弃）
 struct CharacterCardsView: View {
     @Bindable var project: BookProject
     @Environment(\.modelContext) private var context
+    @Binding var organizeSheet: Bool
+    @Binding var newCardRequest: Bool
     @State private var showEditor = false
     @State private var editingCard: CharacterCard?
-    @State private var showOrganize = false
 
     private var groups: [String: [CharacterCard]] {
         Dictionary(grouping: project.characterCards) { $0.groupName.isEmpty ? "未分组" : $0.groupName }
@@ -33,22 +35,14 @@ struct CharacterCardsView: View {
                 }
             }
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button {
-                    showOrganize = true
-                } label: { Image(systemName: "sparkles") }
-                Button {
-                    editingCard = nil
-                    showEditor = true
-                } label: { Image(systemName: "plus") }
-            }
-        }
         .sheet(isPresented: $showEditor) {
             CardEditorSheet(project: project, card: editingCard)
         }
-        .sheet(isPresented: $showOrganize) {
+        .sheet(isPresented: $organizeSheet) {
             CharacterOrganizeSheet(project: project)
+        }
+        .sheet(isPresented: $newCardRequest) {
+            CardEditorSheet(project: project, card: nil)
         }
     }
 }

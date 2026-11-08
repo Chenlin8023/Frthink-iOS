@@ -17,8 +17,8 @@ struct BookshelfView: View {
     @State private var importMessage: String?
 
     var body: some View {
-        NavigationStack {
-            Group {
+        // 根栈由 RootView 提供（避免与工作台 TabView 叠成双层标签栏）
+        Group {
                 if filtered.isEmpty {
                     ContentUnavailableView("暂无项目", systemImage: "books.vertical",
                                            description: Text("点按右上角 + 新建书目\n使用教程在「设置」页顶部"))
@@ -55,6 +55,7 @@ struct BookshelfView: View {
             .searchable(text: $searchText, prompt: "搜索书名")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
+                    NavigationLink { SettingsView() } label: { Image(systemName: "gearshape") }
                     NavigationLink { TrashView() } label: { Image(systemName: "trash") }
                     Menu {
                         Button("新建书目", systemImage: "plus.circle") { showNewSheet = true }
@@ -71,7 +72,6 @@ struct BookshelfView: View {
             .alert("导入结果", isPresented: .init(get: { importMessage != nil }, set: { _ in importMessage = nil })) {
                 Button("好", role: .cancel) {}
             } message: { Text(importMessage ?? "") }
-        }
     }
 
     private var filtered: [BookProject] {

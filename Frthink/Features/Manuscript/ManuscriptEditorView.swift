@@ -4,17 +4,16 @@ import UniformTypeIdentifiers
 import CoreFoundation
 
 /// 书稿编辑器（对应 Android: WebView+CodeMirror 编辑器、续写锚、查找替换、章节导航、导入正文）
+/// 注意：导航栏按钮（导入正文 / 续写）与相关面板由 ProjectWorkspaceView 统一声明——
+/// 外层已有 .toolbar 时子视图的导航栏工具条项会被 iOS 17 丢弃；这里只保留键盘工具条。
 struct ManuscriptEditorView: View {
     @Bindable var project: BookProject
+    @Binding var importer: Bool
+    @Binding var findReplace: Bool
+    @Binding var chapterNav: Bool
+    @Binding var promptPreview: Bool
     @Environment(\.modelContext) private var context
-    @Environment(\.colorScheme) private var colorScheme
 
-    @State private var showFindReplace = false
-    @State private var findText = ""
-    @State private var replaceText = ""
-    @State private var showChapterNav = false
-    @State private var showImporter = false
-    @State private var showPromptPreview = false
     @State private var lastSaved = Date.now
 
     var body: some View {
@@ -62,38 +61,16 @@ struct ManuscriptEditorView: View {
             .background(.bar)
         }
         .toolbar {
-            ToolbarItemGroup(placement: .topBarLeading) {
-                Button {
-                    showImporter = true
-                } label: {
-                    Label("导入正文", systemImage: "square.and.arrow.down")
-                }
-            }
             ToolbarItemGroup(placement: .keyboard) {
-                Button {
-                    showFindReplace = true
-                } label: { Image(systemName: "magnifyingglass") }
-                Button {
-                    showChapterNav = true
-                } label: { Image(systemName: "list.bullet.indent") }
+                Button { findReplace = true } label: { Image(systemName: "magnifyingglass") }
+                Button { chapterNav = true } label: { Image(systemName: "list.bullet.indent") }
                 Button {
                     project.bookmarkOffset = project.body.count
                     try? context.save()
                 } label: { Image(systemName: "bookmark") }
-                Button {
-                    showImporter = true
-                } label: { Image(systemName: "square.and.arrow.down") }
+                Button { importer = true } label: { Image(systemName: "square.and.arrow.down") }
                 Spacer()
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("续写") { showPromptPreview = true }
-            }
-        }
-        .sheet(isPresented: $showFindReplace) { findReplaceSheet }
-        .sheet(isPresented: $showChapterNav) { chapterNavSheet }
-        .sheet(isPresented: $showImporter) { importSheet }
-        .sheet(isPresented: $showPromptPreview) {
-            ContinuationSheet(project: project)
         }
         .onChange(of: project.body) { _, _ in
             lastSaved = .now
@@ -101,76 +78,9 @@ struct ManuscriptEditorView: View {
         }
         .onDisappear { try? context.save() }
     }
-
-    // MARK: 查找与替换
-    private var findReplaceSheet: some View {
-        NavigationStack {
-            Form {
-                TextField("查找", text: $findText)
-                TextField("替换为", text: $replaceText)
-                Button("全部替换") {
-                    if !findText.isEmpty {
-                        project.body = project.body.replacingOccurrences(of: findText, with: replaceText)
-                        try? context.save()
-                    }
-                }
-                .disabled(findText.isEmpty)
-                let count = findText.isEmpty ? 0 : project.body.components(separatedBy: findText).count - 1
-                Text(count > 0 ? "找到 \(count) 处" : "没有找到")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            .navigationTitle("查找与替换")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showFindReplace = false } } }
-        }
-        .presentationDetents([.medium])
-    }
-
-    // MARK: 章节导航
-    private var chapterNavSheet: some View {
-        NavigationStack {
-            List {
-                let chapters = PromptBuilder.chapterRanges(in: project.body)
-                if chapters.isEmpty {
-                    Text("没有识别到章节标题").foregroundStyle(.secondary)
-                }
-                ForEach(Array(chapters.enumerated()), id: \.offset) { _, ch in
-                    VStack(alignment: .leading) {
-                        Text(ch.title)
-                        Text("第 \(ch.offset) 字 · 约 \(Int(Double(ch.offset) / max(1, Double(project.body.count)) * 100))%")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .navigationTitle("章节导航")
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showChapterNav = false } } }
-        }
-        .presentationDetents([.large])
-    }
-
-    // MARK: 导入正文（.txt / .md，GBK 与 UTF-8 双编码，替换或追加）
-    private var importSheet: some View {
-        TextImportSheet(
-            onReplace: { text in
-                let snap = BodySnapshot(project: project, label: "导入前备份", body: project.body)
-                context.insert(snap)
-                project.body = text
-                project.updatedAt = .now
-                project.anchorOffset = nil
-                try? context.save()
-                SettingsStore.shared.haptic()
-            },
-            onAppend: { text in
-                let snap = BodySnapshot(project: project, label: "追加前备份", body: project.body)
-                context.insert(snap)
-                project.body += (project.body.isEmpty || project.body.hasSuffix("\n") ? "" : "\n") + text
-                project.updatedAt = .now
-                try? context.save()
-                SettingsStore.shared.haptic()
-            })
-    }
 }
 
-/// 文本文件导入器（对应 Android: 导入正文，文件≤300MiB，导入预览）
+/// 文本文件导入器（对应 Android: 导入正文，文件≤300MiB，导入预览，GBK 与 UTF-8 双编码）
 struct TextImportSheet: View {
     let onReplace: (String) -> Void
     let onAppend: (String) -> Void

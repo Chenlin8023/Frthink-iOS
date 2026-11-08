@@ -2,12 +2,14 @@ import SwiftUI
 import SwiftData
 
 /// 世界书（对应 Android: 世界书/词条注入）+ 语料库
+/// 注意：导航栏按钮（语料库 / ＋ 新增词条）由 ProjectWorkspaceView 统一声明
 struct WorldBookView: View {
     @Bindable var project: BookProject
     @Environment(\.modelContext) private var context
+    @Binding var corpusSheet: Bool
+    @Binding var newEntryRequest: Bool
     @State private var showEditor = false
     @State private var editing: WorldEntry?
-    @State private var showCorpus = false
 
     private var entries: [WorldEntry] {
         ProjectData.worldEntries(project, context: context)
@@ -45,16 +47,13 @@ struct WorldBookView: View {
                 }
             }
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button { showCorpus = true } label: { Image(systemName: "books.vertical") }
-                Button { editing = nil; showEditor = true } label: { Image(systemName: "plus") }
-            }
-        }
         .sheet(isPresented: $showEditor) {
             WorldEntryEditor(project: project, entry: editing)
         }
-        .sheet(isPresented: $showCorpus) { CorpusListView(project: project) }
+        .sheet(isPresented: $corpusSheet) { CorpusListView(project: project) }
+        .sheet(isPresented: $newEntryRequest) {
+            WorldEntryEditor(project: project, entry: nil)
+        }
     }
 }
 
@@ -210,11 +209,11 @@ struct CorpusCollectSheet: View {
     }
 }
 
-/// 事件卡（对应 Android: PlotEventCard）
+/// 事件卡（对应 Android: PlotEventCard）；「提取事件」按钮由 ProjectWorkspaceView 统一声明
 struct EventsView: View {
     @Bindable var project: BookProject
     @Environment(\.modelContext) private var context
-    @State private var showExtract = false
+    @Binding var extractSheet: Bool
     @State private var showEditor = false
     @State private var editing: PlotEvent?
 
@@ -236,12 +235,7 @@ struct EventsView: View {
                 .contextMenu { Button("删除事件", role: .destructive) { context.delete(ev); try? context.save() } }
             }
         }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("提取事件") { showExtract = true }.disabled(project.body.isEmpty)
-            }
-        }
-        .sheet(isPresented: $showExtract) { EventExtractSheet(project: project) }
+        .sheet(isPresented: $extractSheet) { EventExtractSheet(project: project) }
         .sheet(isPresented: $showEditor) { EventEditor(project: project, event: editing) }
     }
 }

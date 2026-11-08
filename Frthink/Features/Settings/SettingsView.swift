@@ -11,26 +11,25 @@ struct SettingsView: View {
     @State private var editingCred: ApiCredential?
 
     var body: some View {
-        NavigationStack {
-            List {
-                Section("帮助") {
-                    NavigationLink {
-                        HelpView()
-                    } label: {
-                        Label("使用教程（先看这个）", systemImage: "questionmark.circle")
-                    }
+        // 由书架页的根 NavigationStack 推入（不再自带栈，避免嵌套）
+        List {
+            Section("帮助") {
+                NavigationLink {
+                    HelpView()
+                } label: {
+                    Label("使用教程（先看这个）", systemImage: "questionmark.circle")
                 }
-                credentialSection
-                modelSection
-                budgetSection
-                usageSection
-                appearanceSection
-                archiveSection
             }
-            .navigationTitle("设置")
-            .sheet(isPresented: $showCredentialEditor) {
-                CredentialEditorSheet(credentials: $settings.credentials, credential: editingCred)
-            }
+            credentialSection
+            modelSection
+            budgetSection
+            usageSection
+            appearanceSection
+            archiveSection
+        }
+        .navigationTitle("设置")
+        .sheet(isPresented: $showCredentialEditor) {
+            CredentialEditorSheet(credentials: $settings.credentials, credential: editingCred)
         }
     }
 
