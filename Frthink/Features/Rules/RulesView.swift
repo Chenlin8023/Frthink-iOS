@@ -80,12 +80,19 @@ struct RuleInductSheet: View {
     @State private var userText = ""
     @State private var errorText: String?
     @State private var notice = ""
+    @State private var showRange = false
     @State private var task: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("分析范围：\(WorkRangeStore.label(for: project))")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("更改") { showRange = true }.font(.caption)
+                    }
                     if project.body.isEmpty { EmptyBodyHint() }
                     if running {
                         HStack { ProgressView(); Text("正在归纳…") }
@@ -111,6 +118,8 @@ struct RuleInductSheet: View {
                 .padding()
             }
             .navigationTitle("规则归纳")
+            .sheet(isPresented: $showRange) { WorkRangePickerSheet(project: project) }
+            .onChange(of: showRange) { _, showing in if !showing { compile() } }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { task?.cancel(); dismiss() } } }
             .onAppear(perform: compile)
         }
@@ -119,7 +128,8 @@ struct RuleInductSheet: View {
     private func compile() {
         let existing = ((try? context.fetch(FetchDescriptor<WritingRule>())) ?? [])
             .filter { $0.project == project && $0.kind == "style" }.map(\.line)
-        let seg = String(project.body.suffix(SettingsStore.shared.segmentBudget * 2))
+        let seg = WorkRangeStore.analysisText(for: project,
+                                              fallbackSuffix: SettingsStore.shared.segmentBudget * 2)
         let compiled = PromptBuilder.compileRuleInduction(existingRules: existing, segment: seg)
         sysText = compiled.messages[0].content
         userText = compiled.messages[1].content

@@ -42,6 +42,7 @@ struct PromptEditorSection: View {
                 Text("User").font(.caption2).foregroundStyle(.secondary)
                 TextEditor(text: $userText).font(.caption).frame(minHeight: 130)
                     .border(Color.secondary.opacity(0.3))
+                Text("共 \(userText.count) 字").font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
@@ -56,6 +57,12 @@ struct HelpView: View {
                 step(1, "配置模型密钥", "我的书架右上角齿轮 ⚙ 进入设置 → 凭证管理 → 长按当前凭证 → 「编辑凭证」→ 填 API Key → 「测试连接」。预置 DeepSeek 官方 / OpenRouter，也可自定义 OpenAI 兼容地址。")
                 step(2, "新建书目", "「我的书架」→ 右上角 + → 新建书目（填书名，梗概可选）。")
                 step(3, "导入正文 / 开始写作", "进入书 → 「书稿」页 → 右上角导入图标选 .txt/.md（GBK、UTF-8 都支持），或直接粘贴/输入。空白书也可以直接点「续写」让 AI 起稿。")
+            }
+            Section("推荐流水线（酒馆式工作法）") {
+                step(1, "选定工作范围", "书稿页键盘条「章节导航」或各分析面板的「更改」→ 点章节即选中该章为分析范围；也可自定义字符区间。范围会显示在每个分析面板顶部。")
+                step(2, "人物卡分析", "人物页 ✨ → 按选定范围分段提取出场角色（确定故事参与角色）。")
+                step(3, "语料 / 事件 / 文风", "对同一范围分别跑 语料收集、事件提取、长期规则归纳 —— 都是前期资料工作。")
+                step(4, "续写", "在范围面板把续写锚设为范围末尾（或书稿页放锚）→ 右上角「续写」→ 剧情梗概 + 写作规范 + 尾部正文 + 你的续写大纲（本轮指令）自动集成为最终提示词 → 生成新故事。")
             }
             Section("核心工作流（进入一本书后的 5 个页签）") {
                 step(0, "书稿", "正文编辑器。续写锚：把锚放在想继续的位置，AI 只从锚后生成；查找替换、章节导航、书签在键盘工具条；导入正文在右上角。右上角「续写」= 提示词预览 → 生成 → 追加到正文 / 从锚点替换 / 仅存气泡。")

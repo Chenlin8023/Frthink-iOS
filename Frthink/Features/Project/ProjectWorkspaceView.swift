@@ -19,6 +19,7 @@ struct ProjectWorkspaceView: View {
     @State private var showPromptPreview = false
     @State private var findText = ""
     @State private var replaceText = ""
+    @State private var rangeTick = 0
     // 人物
     @State private var showOrganize = false
     @State private var showNewCard = false
@@ -175,15 +176,45 @@ struct ProjectWorkspaceView: View {
                 if chapters.isEmpty {
                     Text("没有识别到章节标题").foregroundStyle(.secondary)
                 }
-                ForEach(Array(chapters.enumerated()), id: \.offset) { _, ch in
-                    VStack(alignment: .leading) {
-                        Text(ch.title)
-                        Text("第 \(ch.offset) 字 · 约 \(Int(Double(ch.offset) / max(1, Double(project.body.count)) * 100))%")
-                            .font(.caption).foregroundStyle(.secondary)
+                Section("点击章节：设定分析范围 / 锚定续写位置") {
+                    ForEach(Array(chapters.enumerated()), id: \.offset) { i, ch in
+                        let end = i + 1 < chapters.count ? chapters[i + 1].offset : project.body.count
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(ch.title)
+                            Text("第 \(ch.offset)–\(end) 字 · 约 \(end - ch.offset) 字")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                Button {
+                                    WorkRangeStore.set(WorkRange(start: ch.offset, end: end), for: project)
+                                    rangeTick += 1
+                                } label: {
+                                    Label("设为分析范围", systemImage: "text.magnifyingglass")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                                Button {
+                                    project.anchorOffset = ch.offset
+                                    try? context.save()
+                                    rangeTick += 1
+                                } label: {
+                                    Label("锚定续写", systemImage: "anchor")
+                                        .font(.caption)
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+                    }
+                }
+                Section {
+                    Text("当前分析范围：\(WorkRangeStore.label(for: project))")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let a = project.anchorOffset {
+                        Text("当前续写锚：第 \(a) 字").font(.caption).foregroundStyle(.secondary)
                     }
                 }
             }
             .navigationTitle("章节导航")
+            .id(rangeTick)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showChapterNav = false } } }
         }
         .presentationDetents([.large])

@@ -155,12 +155,19 @@ struct CorpusCollectSheet: View {
     @State private var userText = ""
     @State private var errorText: String?
     @State private var notice = ""
+    @State private var showRange = false
     @State private var task: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("分析范围：\(WorkRangeStore.label(for: project))")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("更改") { showRange = true }.font(.caption)
+                    }
                     if project.body.isEmpty { EmptyBodyHint() }
                     if running {
                         HStack { ProgressView(); Text("正在收集…") }
@@ -186,15 +193,17 @@ struct CorpusCollectSheet: View {
                 .padding()
             }
             .navigationTitle("语料收集")
+            .sheet(isPresented: $showRange) { WorkRangePickerSheet(project: project) }
+            .onChange(of: showRange) { _, showing in if !showing { compile() } }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { task?.cancel(); dismiss() } } }
             .onAppear(perform: compile)
         }
     }
 
     private func compile() {
-        let budget = SettingsStore.shared.segmentBudget
-        let tail = String(project.body.suffix(budget * 3))
-        let compiled = PromptBuilder.compileCorpusExtraction(segment: tail)
+        let seg = WorkRangeStore.analysisText(for: project,
+                                              fallbackSuffix: SettingsStore.shared.segmentBudget * 3)
+        let compiled = PromptBuilder.compileCorpusExtraction(segment: seg)
         sysText = compiled.messages[0].content
         userText = compiled.messages[1].content
     }
@@ -325,12 +334,19 @@ struct EventExtractSheet: View {
     @State private var userText = ""
     @State private var errorText: String?
     @State private var notice = ""
+    @State private var showRange = false
     @State private var task: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("分析范围：\(WorkRangeStore.label(for: project))")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("更改") { showRange = true }.font(.caption)
+                    }
                     if project.body.isEmpty { EmptyBodyHint() }
                     if running {
                         HStack { ProgressView(); Text("正在提取…") }
@@ -356,6 +372,8 @@ struct EventExtractSheet: View {
                 .padding()
             }
             .navigationTitle("提取事件")
+            .sheet(isPresented: $showRange) { WorkRangePickerSheet(project: project) }
+            .onChange(of: showRange) { _, showing in if !showing { compile() } }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { task?.cancel(); dismiss() } } }
             .onAppear(perform: compile)
         }
@@ -363,7 +381,8 @@ struct EventExtractSheet: View {
 
     private func compile() {
         let existing = project.events.map(\.title)
-        let seg = String(project.body.suffix(SettingsStore.shared.segmentBudget * 2))
+        let seg = WorkRangeStore.analysisText(for: project,
+                                              fallbackSuffix: SettingsStore.shared.segmentBudget * 2)
         let compiled = PromptBuilder.compileEventExtraction(existingTitles: existing, segment: seg)
         sysText = compiled.messages[0].content
         userText = compiled.messages[1].content
