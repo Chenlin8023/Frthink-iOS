@@ -24,6 +24,13 @@ struct SettingsView: View {
                         Label("使用教程（先看这个）", systemImage: "questionmark.circle")
                     }
                 }
+                Section("全局预设（注入所有 AI 请求，酒馆式）") {
+                    TextEditor(text: $settings.extraSystemPrompt)
+                        .font(.caption)
+                        .frame(minHeight: 80)
+                    Text("写在下面的内容会追加到每个请求的 System 末尾：人设口吻、世界观约束、输出格式要求等。留空＝不启用。")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
                 credentialSection
                 modelSection
                 budgetSection

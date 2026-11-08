@@ -30,6 +30,9 @@ final class SettingsStore {
     // 外观与反馈
     var hapticsEnabled: Bool { didSet { defaults.set(hapticsEnabled, forKey: "ui.haptics") } }
 
+    // 全局追加系统提示词（酒馆式"全局预设"：注入所有 AI 请求的 system 末尾）
+    var extraSystemPrompt: String { didSet { defaults.set(extraSystemPrompt, forKey: "prompt.extraSystem") } }
+
     private let defaults = UserDefaults.standard
 
     init() {
@@ -48,6 +51,7 @@ final class SettingsStore {
         let tp = defaults.object(forKey: "gen.temperature") as? Double ?? 1.0
         let mt = defaults.object(forKey: "gen.maxTokens") as? Int ?? 4096
         let hp = defaults.object(forKey: "ui.haptics") as? Bool ?? true
+        let ep = defaults.string(forKey: "prompt.extraSystem") ?? ""
 
         self.credentials = creds
         self.activeCredentialId = activeId
@@ -60,6 +64,7 @@ final class SettingsStore {
         self.temperature = tp
         self.maxOutputTokens = mt
         self.hapticsEnabled = hp
+        self.extraSystemPrompt = ep
     }
 
     private func saveCredentials() {

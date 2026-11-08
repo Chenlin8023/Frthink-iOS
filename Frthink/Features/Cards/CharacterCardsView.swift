@@ -157,6 +157,8 @@ struct CharacterOrganizeSheet: View {
     @State private var newCount = 0
     @State private var task: Task<Void, Never>?
     @State private var log: [String] = []
+    @State private var showSys = ""
+    @State private var showUser = ""
 
     var body: some View {
         NavigationStack {
@@ -183,6 +185,17 @@ struct CharacterOrganizeSheet: View {
                 if !log.isEmpty {
                     List(log.reversed(), id: \.self, rowContent: { Text($0).font(.caption) })
                 }
+                if !showSys.isEmpty {
+                    DisclosureGroup("提示词模板（首段预览；正文片段每段自动更换）") {
+                        ScrollView {
+                            Text(showSys + "\n\n────────\n\n" + showUser)
+                                .font(.caption2).foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 180)
+                    }
+                    .font(.caption)
+                }
                 Spacer()
             }
             .padding()
@@ -193,6 +206,13 @@ struct CharacterOrganizeSheet: View {
 
     private func run() {
         let segments = PromptBuilder.segments(of: project.body, budget: SettingsStore.shared.segmentBudget)
+        if let s0 = segments.first {
+            let c0 = PromptBuilder.compileCharacterExtraction(project: project,
+                                                              existingCards: project.characterCards,
+                                                              segment: s0)
+            showSys = c0.messages[0].content
+            showUser = c0.messages[1].content
+        }
         running = true
         processed = 0; newCount = 0; log = []
         guard let cred = SettingsStore.shared.activeCredential else {

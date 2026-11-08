@@ -308,6 +308,14 @@ struct ContinuationSheet: View {
     @State private var task: Task<Void, Never>?
     @State private var errorText: String?
     @State private var applyMode: ApplyMode = .append
+    // 酒馆式注入开关（对应 Android: PromptBlockPreference）
+    @State private var useCards = true
+    @State private var useWorld = true
+    @State private var useCorpus = true
+    @State private var useRules = true
+    // 可编辑提示词（反黑箱）
+    @State private var editSys = ""
+    @State private var editUser = ""
 
     enum ApplyMode: String, CaseIterable { case append = "追加到正文"; case replaceTail = "从锚点替换"; case chatOnly = "仅保存在气泡" }
 
@@ -316,7 +324,21 @@ struct ContinuationSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if let preview, result.isEmpty && !running {
+                        HStack(spacing: 12) {
+                            Toggle("人物卡", isOn: $useCards).font(.caption)
+                            Toggle("世界书", isOn: $useWorld).font(.caption)
+                        }
+                        HStack(spacing: 12) {
+                            Toggle("语料", isOn: $useCorpus).font(.caption)
+                            Toggle("规则", isOn: $useRules).font(.caption)
+                        }
+                        .toggleStyle(.button)
+                        .onChange(of: useCards) { _, _ in buildPreview() }
+                        .onChange(of: useWorld) { _, _ in buildPreview() }
+                        .onChange(of: useCorpus) { _, _ in buildPreview() }
+                        .onChange(of: useRules) { _, _ in buildPreview() }
                         promptPreview(preview)
+                        PromptEditorSection(systemText: $editSys, userText: $editUser)
                     }
                     if running {
                         HStack { ProgressView(); Text("正在生成…") }
@@ -374,15 +396,21 @@ struct ContinuationSheet: View {
 
     private func buildPreview() {
         let settings = SettingsStore.shared
+        let bookRules = useRules
+            ? ((try? context.fetch(FetchDescriptor<WritingRule>()))?
+                .filter { $0.project == project } ?? []) : []
         preview = PromptBuilder.compileContinuation(
             project: project, instruction: instruction,
-            globalRules: ProjectData.globalRules(context: context),
-            bookRules: (try? context.fetch(FetchDescriptor<WritingRule>()))?
-                .filter { $0.project == project } ?? [],
-            worldEntries: ProjectData.worldEntries(project, context: context),
-            corpusEntries: ProjectData.corpusEntries(project, context: context),
-            cards: project.characterCards,
+            globalRules: useRules ? ProjectData.globalRules(context: context) : [],
+            bookRules: bookRules,
+            worldEntries: useWorld ? ProjectData.worldEntries(project, context: context) : [],
+            corpusEntries: useCorpus ? ProjectData.corpusEntries(project, context: context) : [],
+            cards: useCards ? project.characterCards : [],
             contextBudget: settings.contextBudget)
+        if let p = preview {
+            editSys = p.messages[0].content
+            editUser = p.messages[1].content
+        }
     }
 
     private func promptPreview(_ p: PromptBuilder.Compiled) -> some View {
@@ -399,13 +427,15 @@ struct ContinuationSheet: View {
     }
 
     private func run() {
-        guard let preview, let cred = SettingsStore.shared.activeCredential else { return }
+        guard let cred = SettingsStore.shared.activeCredential, !editSys.isEmpty || !editUser.isEmpty else { return }
         running = true
         result = ""
         errorText = nil
         var cred2 = cred
         if !SettingsStore.shared.writingModel.isEmpty { cred2.model = SettingsStore.shared.writingModel }
-        task = LlmClient.shared.stream(credential: cred2, messages: preview.messages,
+        task = LlmClient.shared.stream(credential: cred2,
+                                       messages: [LlmMessage(role: "system", content: editSys),
+                                                  LlmMessage(role: "user", content: editUser)],
                                        temperature: SettingsStore.shared.temperature,
                                        maxTokens: SettingsStore.shared.maxOutputTokens) { ev in
             DispatchQueue.main.async {

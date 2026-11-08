@@ -11,6 +11,13 @@ enum PromptBuilder {
         var tailLength: Int
     }
 
+    /// 全局追加预设（对应酒馆"全局预设"/安卓 GlobalPreset）：注入所有请求 system 末尾，设置页维护
+    static func withGlobalPreset(_ system: String) -> String {
+        let extra = SettingsStore.shared.extraSystemPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !extra.isEmpty else { return system }
+        return system + "\n\n【全局预设（用户自定义，须遵守）】\n" + extra
+    }
+
     /// 世界书关键词命中：正文尾部窗口包含任一关键词即注入（空关键词=常驻）
     static func matchedWorldEntries(entries: [WorldEntry], window: String) -> [WorldEntry] {
         entries.filter { e in
@@ -95,6 +102,8 @@ enum PromptBuilder {
         userText += "\n【本轮指令】\n\(instruction.isEmpty ? "从书稿结尾之后继续写下去。" : instruction)\n"
         userText += "\n直接输出续写的正文，不要解释，不要输出标题或总结。"
 
+        system = withGlobalPreset(system)
+
         return Compiled(
             messages: [LlmMessage(role: "system", content: system),
                        LlmMessage(role: "user", content: userText)],
@@ -109,7 +118,7 @@ enum PromptBuilder {
         existingCards: [CharacterCard],
         segment: String
     ) -> Compiled {
-        let system = """
+        let system = withGlobalPreset("""
         你是小说人物资料整理助手。根据给定正文片段，提取人物事实。
         要求：
         - 只依据正文，证据不足则留空，不推测未发生的行动。
@@ -117,7 +126,7 @@ enum PromptBuilder {
         - 先结合上下文判断身份再去重：本名归一，别称归入 aliases；泛称（代词、职业称呼）不单独作为身份依据。
         - 输出严格 JSON：{"characters":[{"name":"","aliases":"","identity":"","goals":"","personality":"","speech":"","memories":"","attitudes":""}]}
         - 没有新人物时输出 {"characters":[]}。不要输出其他内容。
-        """
+        """)
         var user = "【已有人物卡】\n"
         user += existingCards.isEmpty ? "（无）\n" :
             existingCards.map { c in "- \(c.name)" + (c.aliases.isEmpty ? "" : "（\(c.aliases)）") }
@@ -134,12 +143,12 @@ enum PromptBuilder {
         existingRules: [String],
         segment: String
     ) -> Compiled {
-        let system = """
+        let system = withGlobalPreset("""
         你是写作规则归纳助手。阅读正文片段，提炼可迁移的写作规则（视角、节奏、对白、心理描写、转场等）。
         要求：
         - 只依据正文；不复述剧情，不照搬原句，不猜测。
         - 只输出已有规则之外的新规则，每行一条，不写标题；没有新增只输出 NO_ADDITIONS。
-        """
+        """)
         var user = "【已有规则】\n"
         user += existingRules.isEmpty ? "（无）\n" : existingRules.map { "- \($0)" }.joined(separator: "\n") + "\n"
         user += "\n【正文片段】\n\(segment)"
@@ -154,12 +163,12 @@ enum PromptBuilder {
         existingTitles: [String],
         segment: String
     ) -> Compiled {
-        let system = """
+        let system = withGlobalPreset("""
         你是剧情事件整理助手。以有意义的场景事件为单位提取事件，描述起因、发展和结果。
         要求：
         - 已有事件的后续使用完全相同的 title；只返回新增进展，禁止重复已有信息。
         - 输出严格 JSON：{"events":[{"title":"","cause":"","development":"","result":""}]}；没有新事件输出 {"events":[]}。不要输出其他内容。
-        """
+        """)
         var user = "【已有事件】\n"
         user += existingTitles.isEmpty ? "（无）\n" : existingTitles.map { "- \($0)" }.joined(separator: "\n") + "\n"
         user += "\n【正文片段】\n\(segment)"
@@ -171,13 +180,26 @@ enum PromptBuilder {
 
     /// 编译"翻译"请求（只输出译文）
     static func compileTranslation(segment: String, target: String) -> Compiled {
-        let system = """
+        let system = withGlobalPreset("""
         你是专业翻译。将给定片段翻译为\(target)。
         要求：只输出译文，不解释、不加注；保留段落与标点结构；人名与专有名词保持一致。
-        """
+        """)
         return Compiled(
             messages: [LlmMessage(role: "system", content: system),
                        LlmMessage(role: "user", content: segment)],
+            injectedWorld: [], injectedCards: [], tailLength: segment.count)
+    }
+
+    /// 编译"语料收集"请求（每行一条事实）
+    static func compileCorpusExtraction(segment: String) -> Compiled {
+        let system = withGlobalPreset("""
+        你是小说设定资料整理助手。从正文中提取世界观、设定、地点、规则类事实。
+        只依据正文；不猜测；只输出资料未包含的新信息；不写剧情事件。
+        每行输出一条事实，没有新增只输出 NO_ADDITIONS。
+        """)
+        return Compiled(
+            messages: [LlmMessage(role: "system", content: system),
+                       LlmMessage(role: "user", content: "【正文】\n\(segment)")],
             injectedWorld: [], injectedCards: [], tailLength: segment.count)
     }
 

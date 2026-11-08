@@ -75,64 +75,96 @@ struct RuleInductSheet: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @State private var running = false
-    @State private var added = 0
+    @State private var rawText = ""
+    @State private var sysText = ""
+    @State private var userText = ""
     @State private var errorText: String?
+    @State private var notice = ""
     @State private var task: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                if project.body.isEmpty { EmptyBodyHint() }
-                if running {
-                    ProgressView(); Text("正在归纳…")
-                    Button("停止归纳", role: .destructive) { task?.cancel() }
-                } else {
-                    Text(added == 0 ? "从正文归纳可迁移的写作规则（只增不减）" : "已归纳 \(added) 条规则")
-                    Button("开始归纳") { run() }.buttonStyle(.borderedProminent)
-                        .disabled(project.body.isEmpty)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if project.body.isEmpty { EmptyBodyHint() }
+                    if running {
+                        HStack { ProgressView(); Text("正在归纳…") }
+                        Button("停止归纳", role: .destructive) { task?.cancel() }
+                    } else {
+                        Button("开始归纳（使用下方提示词）") { run() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(project.body.isEmpty)
+                    }
+                    if !notice.isEmpty { Text(notice).font(.caption).foregroundStyle(.green) }
+                    if let errorText {
+                        Text(errorText).font(.caption).foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                    }
+                    if !rawText.isEmpty {
+                        Text("AI 原始回复（可修正后保存）").font(.caption).foregroundStyle(.secondary)
+                        TextEditor(text: $rawText).font(.caption).frame(minHeight: 140)
+                            .border(Color.secondary.opacity(0.3))
+                        Button("解析并保存") { saveParsed() }.buttonStyle(.bordered)
+                    }
+                    PromptEditorSection(systemText: $sysText, userText: $userText)
                 }
-                if let errorText {
-                    Text(errorText).font(.caption).foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                }
-                Spacer()
+                .padding()
             }
-            .padding()
             .navigationTitle("规则归纳")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { task?.cancel(); dismiss() } } }
+            .onAppear(compile)
         }
+    }
+
+    private func compile() {
+        let existing = ((try? context.fetch(FetchDescriptor<WritingRule>())) ?? [])
+            .filter { $0.project == project && $0.kind == "style" }.map(\.line)
+        let seg = String(project.body.suffix(SettingsStore.shared.segmentBudget * 2))
+        let compiled = PromptBuilder.compileRuleInduction(existingRules: existing, segment: seg)
+        sysText = compiled.messages[0].content
+        userText = compiled.messages[1].content
     }
 
     private func run() {
         running = true
         errorText = nil
-        guard let cred0 = SettingsStore.shared.activeCredential else { running = false; return }
+        notice = ""
+        guard let cred0 = SettingsStore.shared.activeCredential else { running = false; errorText = "尚未配置凭证"; return }
         var cred = cred0
         let m = SettingsStore.shared.model(for: "extract")
         if !m.isEmpty { cred.model = m }
-        let existing = ((try? context.fetch(FetchDescriptor<WritingRule>())) ?? [])
-            .filter { $0.project == project && $0.kind == "style" }.map(\.line)
-        let seg = String(project.body.suffix(SettingsStore.shared.segmentBudget * 2))
-        let compiled = PromptBuilder.compileRuleInduction(existingRules: existing, segment: seg)
         var acc = ""
-        task = LlmClient.shared.stream(credential: cred, messages: compiled.messages, temperature: 0.4) { ev in
+        task = LlmClient.shared.stream(
+            credential: cred,
+            messages: [LlmMessage(role: "system", content: sysText),
+                       LlmMessage(role: "user", content: userText)],
+            temperature: 0.4) { ev in
             if !ev.contentDelta.isEmpty { acc += ev.contentDelta }
             if let f = ev.finished {
-                if !f.hasPrefix("error:") {
                 DispatchQueue.main.async {
-                    for line in acc.split(separator: "\n") {
-                        let t = line.trimmingCharacters(in: CharacterSet(charactersIn: "- •*")).trimmingCharacters(in: .whitespaces)
-                        if t.isEmpty || t.contains("NO_ADDITIONS") { continue }
-                        context.insert(WritingRule(project: project, kind: "style", line: t))
-                        added += 1
-                    }
-                    try? context.save()
                     running = false
-                }
-                } else {
-                    DispatchQueue.main.async { running = false; errorText = f }
+                    if f.hasPrefix("error:") { errorText = f; return }
+                    rawText = acc
+                    let n = saveParsed()
+                    notice = n > 0 ? "已自动解析并保存 \(n) 条规则"
+                                   : "已收到回复但未能自动解析——可在上方修正文本后点「解析并保存」"
                 }
             }
         }
+    }
+
+    /// 从（可被用户修正过的）原始回复按行解析规则并入库
+    @discardableResult
+    private func saveParsed() -> Int {
+        var n = 0
+        for line in rawText.split(separator: "\n") {
+            let t = line.trimmingCharacters(in: CharacterSet(charactersIn: "- •*")).trimmingCharacters(in: .whitespaces)
+            if t.isEmpty || t.contains("NO_ADDITIONS") || t == "```" { continue }
+            context.insert(WritingRule(project: project, kind: "style", line: t))
+            n += 1
+        }
+        try? context.save()
+        if n > 0 { notice = "已保存 \(n) 条规则" }
+        return n
     }
 }

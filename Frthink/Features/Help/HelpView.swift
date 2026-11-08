@@ -20,6 +20,33 @@ struct EmptyBodyHint: View {
     }
 }
 
+// MARK: - 可编辑提示词区（反黑箱：所有 AI 功能发送前可见、可修改）
+
+struct PromptEditorSection: View {
+    @State private var expanded = false
+    @Binding var systemText: String
+    @Binding var userText: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { expanded.toggle() } label: {
+                Label(expanded ? "收起提示词" : "查看提示词（发送前可修改）",
+                      systemImage: expanded ? "chevron.down" : "chevron.right")
+                    .font(.caption)
+            }
+            .buttonStyle(.borderless)
+            if expanded {
+                Text("System").font(.caption2).foregroundStyle(.secondary)
+                TextEditor(text: $systemText).font(.caption).frame(minHeight: 110)
+                    .border(Color.secondary.opacity(0.3))
+                Text("User").font(.caption2).foregroundStyle(.secondary)
+                TextEditor(text: $userText).font(.caption).frame(minHeight: 130)
+                    .border(Color.secondary.opacity(0.3))
+            }
+        }
+    }
+}
+
 // MARK: - 使用教程（对应 Android: 应用内引导）
 
 struct HelpView: View {

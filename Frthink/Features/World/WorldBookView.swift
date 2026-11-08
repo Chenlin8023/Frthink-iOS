@@ -150,71 +150,96 @@ struct CorpusCollectSheet: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @State private var running = false
-    @State private var progress = ""
-    @State private var collected = 0
+    @State private var rawText = ""
+    @State private var sysText = ""
+    @State private var userText = ""
     @State private var errorText: String?
+    @State private var notice = ""
     @State private var task: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                if project.body.isEmpty { EmptyBodyHint() }
-                if running {
-                    ProgressView()
-                    Text(progress)
-                    Button("停止收集", role: .destructive) { task?.cancel() }
-                } else {
-                    Text(collected == 0 ? "从正文中收集设定事实到语料库" : "已收集 \(collected) 条语料")
-                    Button("开始收集") { run() }.buttonStyle(.borderedProminent)
-                        .disabled(project.body.isEmpty)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if project.body.isEmpty { EmptyBodyHint() }
+                    if running {
+                        HStack { ProgressView(); Text("正在收集…") }
+                        Button("停止收集", role: .destructive) { task?.cancel() }
+                    } else {
+                        Button("开始收集（使用下方提示词）") { run() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(project.body.isEmpty)
+                    }
+                    if !notice.isEmpty { Text(notice).font(.caption).foregroundStyle(.green) }
+                    if let errorText {
+                        Text(errorText).font(.caption).foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                    }
+                    if !rawText.isEmpty {
+                        Text("AI 原始回复（可修正后保存）").font(.caption).foregroundStyle(.secondary)
+                        TextEditor(text: $rawText).font(.caption).frame(minHeight: 140)
+                            .border(Color.secondary.opacity(0.3))
+                        Button("解析并保存") { saveParsed() }.buttonStyle(.bordered)
+                    }
+                    PromptEditorSection(systemText: $sysText, userText: $userText)
                 }
-                if let errorText {
-                    Text(errorText).font(.caption).foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                }
-                Spacer()
+                .padding()
             }
-            .padding()
             .navigationTitle("语料收集")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { task?.cancel(); dismiss() } } }
+            .onAppear(compile)
         }
     }
 
-    private func run() {
+    private func compile() {
         let budget = SettingsStore.shared.segmentBudget
         let tail = String(project.body.suffix(budget * 3))
-        let system = """
-        你是小说设定资料整理助手。从正文中提取世界观、设定、地点、规则类事实。
-        只依据正文；不猜测；只输出资料未包含的新信息；不写剧情事件。
-        每行输出一条事实，没有新增只输出 NO_ADDITIONS。
-        """
-        running = true; collected = 0; errorText = nil
-        guard let cred0 = SettingsStore.shared.activeCredential else { running = false; return }
+        let compiled = PromptBuilder.compileCorpusExtraction(segment: tail)
+        sysText = compiled.messages[0].content
+        userText = compiled.messages[1].content
+    }
+
+    private func run() {
+        running = true
+        errorText = nil
+        notice = ""
+        guard let cred0 = SettingsStore.shared.activeCredential else { running = false; errorText = "尚未配置凭证"; return }
         var cred = cred0
         let m = SettingsStore.shared.model(for: "extract")
         if !m.isEmpty { cred.model = m }
-        let messages = [LlmMessage(role: "system", content: system),
-                        LlmMessage(role: "user", content: "【正文】\n\(tail)")]
         var acc = ""
-        task = LlmClient.shared.stream(credential: cred, messages: messages, temperature: 0.3) { ev in
+        task = LlmClient.shared.stream(
+            credential: cred,
+            messages: [LlmMessage(role: "system", content: sysText),
+                       LlmMessage(role: "user", content: userText)],
+            temperature: 0.3) { ev in
             if !ev.contentDelta.isEmpty { acc += ev.contentDelta }
             if let f = ev.finished {
                 DispatchQueue.main.async {
-                    if f.hasPrefix("error:") {
-                        errorText = f
-                    } else {
-                        for line in acc.split(separator: "\n") {
-                            let t = line.trimmingCharacters(in: CharacterSet(charactersIn: "- • ")).trimmingCharacters(in: .whitespaces)
-                            if t.isEmpty || t.contains("NO_ADDITIONS") { continue }
-                            context.insert(CorpusEntry(project: project, content: t, sourceRange: "正文尾部"))
-                            collected += 1
-                        }
-                        try? context.save()
-                    }
                     running = false
+                    if f.hasPrefix("error:") { errorText = f; return }
+                    rawText = acc
+                    let n = saveParsed()
+                    notice = n > 0 ? "已自动解析并保存 \(n) 条语料"
+                                   : "已收到回复但未能自动解析——可在上方修正文本后点「解析并保存」"
                 }
             }
         }
+    }
+
+    /// 从（可被用户修正过的）原始回复按行解析语料并入库
+    @discardableResult
+    private func saveParsed() -> Int {
+        var n = 0
+        for line in rawText.split(separator: "\n") {
+            let t = line.trimmingCharacters(in: CharacterSet(charactersIn: "- • ")).trimmingCharacters(in: .whitespaces)
+            if t.isEmpty || t.contains("NO_ADDITIONS") || t == "```" { continue }
+            context.insert(CorpusEntry(project: project, content: t, sourceRange: "正文尾部"))
+            n += 1
+        }
+        try? context.save()
+        if n > 0 { notice = "已保存 \(n) 条语料" }
+        return n
     }
 }
 
@@ -295,75 +320,105 @@ struct EventExtractSheet: View {
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
     @State private var running = false
-    @State private var added = 0
-    @State private var raw = ""
+    @State private var rawText = ""
+    @State private var sysText = ""
+    @State private var userText = ""
     @State private var errorText: String?
+    @State private var notice = ""
     @State private var task: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                if project.body.isEmpty { EmptyBodyHint() }
-                if running {
-                    ProgressView(); Text("正在提取…")
-                    Button("停止", role: .destructive) { task?.cancel() }
-                } else {
-                    Text(added == 0 ? "从正文尾部提取剧情事件" : "已提取 \(added) 个事件")
-                    if !raw.isEmpty {
-                        Text(raw).font(.caption2).foregroundStyle(.secondary).lineLimit(8)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    if project.body.isEmpty { EmptyBodyHint() }
+                    if running {
+                        HStack { ProgressView(); Text("正在提取…") }
+                        Button("停止", role: .destructive) { task?.cancel() }
+                    } else {
+                        Button("开始提取（使用下方提示词）") { run() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(project.body.isEmpty)
                     }
-                    Button("开始提取") { run() }.buttonStyle(.borderedProminent)
+                    if !notice.isEmpty { Text(notice).font(.caption).foregroundStyle(.green) }
+                    if let errorText {
+                        Text(errorText).font(.caption).foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                    }
+                    if !rawText.isEmpty {
+                        Text("AI 原始回复（可修正后保存）").font(.caption).foregroundStyle(.secondary)
+                        TextEditor(text: $rawText).font(.caption).frame(minHeight: 140)
+                            .border(Color.secondary.opacity(0.3))
+                        Button("解析并保存") { saveParsed() }.buttonStyle(.bordered)
+                    }
+                    PromptEditorSection(systemText: $sysText, userText: $userText)
                 }
-                if let errorText {
-                    Text(errorText).font(.caption).foregroundStyle(.red)
-                        .multilineTextAlignment(.center)
-                }
-                Spacer()
+                .padding()
             }
-            .padding()
             .navigationTitle("提取事件")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { task?.cancel(); dismiss() } } }
+            .onAppear(compile)
         }
+    }
+
+    private func compile() {
+        let existing = project.events.map(\.title)
+        let seg = String(project.body.suffix(SettingsStore.shared.segmentBudget * 2))
+        let compiled = PromptBuilder.compileEventExtraction(existingTitles: existing, segment: seg)
+        sysText = compiled.messages[0].content
+        userText = compiled.messages[1].content
     }
 
     private func run() {
         running = true
         errorText = nil
-        guard let cred0 = SettingsStore.shared.activeCredential else { running = false; return }
+        notice = ""
+        guard let cred0 = SettingsStore.shared.activeCredential else { running = false; errorText = "尚未配置凭证"; return }
         var cred = cred0
         let m = SettingsStore.shared.model(for: "extract")
         if !m.isEmpty { cred.model = m }
-        let existing = project.events.map(\.title)
-        let seg = String(project.body.suffix(SettingsStore.shared.segmentBudget * 2))
-        let compiled = PromptBuilder.compileEventExtraction(existingTitles: existing, segment: seg)
         var acc = ""
-        task = LlmClient.shared.stream(credential: cred, messages: compiled.messages, temperature: 0.3) { ev in
+        task = LlmClient.shared.stream(
+            credential: cred,
+            messages: [LlmMessage(role: "system", content: sysText),
+                       LlmMessage(role: "user", content: userText)],
+            temperature: 0.3) { ev in
             if !ev.contentDelta.isEmpty { acc += ev.contentDelta }
             if let f = ev.finished {
-                if !f.hasPrefix("error:") {
                 DispatchQueue.main.async {
-                    raw = acc
-                    if let data = PromptBuilder.extractJSONObject(from: acc),
-                       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       let events = obj["events"] as? [[String: Any]] {
-                        for e in events {
-                            guard let t = e["title"] as? String, !t.isEmpty else { continue }
-                            if existing.contains(t) { continue }
-                            let ev = PlotEvent(project: project, title: t)
-                            ev.cause = (e["cause"] as? String) ?? ""
-                            ev.development = (e["development"] as? String) ?? ""
-                            ev.result = (e["result"] as? String) ?? ""
-                            context.insert(ev)
-                            added += 1
-                        }
-                    }
-                    try? context.save()
                     running = false
-                }
-                } else {
-                    DispatchQueue.main.async { running = false; errorText = f }
+                    if f.hasPrefix("error:") { errorText = f; return }
+                    rawText = acc
+                    let n = saveParsed()
+                    notice = n > 0 ? "已自动解析并保存 \(n) 个事件"
+                                   : "已收到回复但未能自动解析——可在上方修正文本后点「解析并保存」"
                 }
             }
         }
+    }
+
+    /// 从（可被用户修正过的）原始回复解析 events JSON 并入库
+    @discardableResult
+    private func saveParsed() -> Int {
+        guard let data = PromptBuilder.extractJSONObject(from: rawText),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let events = obj["events"] as? [[String: Any]] else {
+            errorText = "解析失败：回复中没有找到 {\"events\": [...]} 结构"
+            return 0
+        }
+        var n = 0
+        for e in events {
+            guard let t = e["title"] as? String, !t.isEmpty else { continue }
+            if project.events.contains(where: { $0.title == t }) { continue }
+            let ev = PlotEvent(project: project, title: t)
+            ev.cause = (e["cause"] as? String) ?? ""
+            ev.development = (e["development"] as? String) ?? ""
+            ev.result = (e["result"] as? String) ?? ""
+            context.insert(ev)
+            n += 1
+        }
+        try? context.save()
+        if n > 0 { notice = "已保存 \(n) 个事件" }
+        return n
     }
 }

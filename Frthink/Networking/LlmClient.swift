@@ -203,6 +203,7 @@ final class LlmClient {
         var lineBytes = [UInt8]()
         var sawDataEvent = false
         var unparsedLines = 0
+        var finishedEmitted = false   // finished 事件只允许发一次（下游 withCheckedContinuation 重复 resume 会崩溃）
         for try await byte in bytes {
             if Task.isCancelled { throw CancellationError() }
             bodyData.append(byte)
@@ -214,7 +215,7 @@ final class LlmClient {
                 guard line.hasPrefix("data:") else { continue }
                 let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
                 if payload == "[DONE]" {
-                    onEvent(LlmStreamEvent(finished: "done"))
+                    if !finishedEmitted { onEvent(LlmStreamEvent(finished: "done")) }
                     return
                 }
                 // 服务端中途错误帧（内容过滤/额度等）：data: {"error": {...}} —— 不能当普通空块忽略
@@ -235,6 +236,7 @@ final class LlmClient {
                     ev.thinkingDelta = delta.reasoning_content ?? ""
                 }
                 ev.finished = chunk.choices?.first?.finish_reason
+                if ev.finished != nil { finishedEmitted = true }
                 if let u = chunk.usage {
                     ev.usage = (u.prompt_tokens ?? 0, u.completion_tokens ?? 0,
                                 u.prompt_tokens_details?.cached_tokens ?? 0)
@@ -251,7 +253,7 @@ final class LlmClient {
 
         // 流正常结束：若没解析出任何 SSE 事件——大概率服务端无视 stream:true 回了一份普通 JSON（兼容模式）
         if sawDataEvent {
-            onEvent(LlmStreamEvent(finished: "done"))
+            if !finishedEmitted { onEvent(LlmStreamEvent(finished: "done")) }
             return
         }
         if let wrap = try? JSONDecoder().decode(NonStreamResponse.self, from: bodyData),
