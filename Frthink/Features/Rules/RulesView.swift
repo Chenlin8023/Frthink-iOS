@@ -112,7 +112,7 @@ struct RuleInductSheet: View {
             }
             .navigationTitle("规则归纳")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { task?.cancel(); dismiss() } } }
-            .onAppear(compile)
+            .onAppear(perform: compile)
         }
     }
 

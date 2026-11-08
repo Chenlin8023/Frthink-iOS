@@ -187,7 +187,7 @@ struct CorpusCollectSheet: View {
             }
             .navigationTitle("语料收集")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { task?.cancel(); dismiss() } } }
-            .onAppear(compile)
+            .onAppear(perform: compile)
         }
     }
 
@@ -357,7 +357,7 @@ struct EventExtractSheet: View {
             }
             .navigationTitle("提取事件")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { task?.cancel(); dismiss() } } }
-            .onAppear(compile)
+            .onAppear(perform: compile)
         }
     }
 
