@@ -1,6 +1,7 @@
 import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
+import CoreFoundation
 
 /// 书稿编辑器（对应 Android: WebView+CodeMirror 编辑器、续写锚、查找替换、章节导航、导入正文）
 struct ManuscriptEditorView: View {
@@ -61,6 +62,13 @@ struct ManuscriptEditorView: View {
             .background(.bar)
         }
         .toolbar {
+            ToolbarItemGroup(placement: .topBarLeading) {
+                Button {
+                    showImporter = true
+                } label: {
+                    Label("导入正文", systemImage: "square.and.arrow.down")
+                }
+            }
             ToolbarItemGroup(placement: .keyboard) {
                 Button {
                     showFindReplace = true
@@ -79,7 +87,6 @@ struct ManuscriptEditorView: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button("续写") { showPromptPreview = true }
-                    .disabled(project.body.isEmpty)
             }
         }
         .sheet(isPresented: $showFindReplace) { findReplaceSheet }
@@ -140,21 +147,33 @@ struct ManuscriptEditorView: View {
         .presentationDetents([.large])
     }
 
-    // MARK: 导入正文（.txt / .md）
+    // MARK: 导入正文（.txt / .md，GBK 与 UTF-8 双编码，替换或追加）
     private var importSheet: some View {
-        TextImportSheet { text in
-            let snap = BodySnapshot(project: project, label: "导入前备份", body: project.body)
-            context.insert(snap)
-            project.body = text
-            project.updatedAt = .now
-            try? context.save()
-        }
+        TextImportSheet(
+            onReplace: { text in
+                let snap = BodySnapshot(project: project, label: "导入前备份", body: project.body)
+                context.insert(snap)
+                project.body = text
+                project.updatedAt = .now
+                project.anchorOffset = nil
+                try? context.save()
+                SettingsStore.shared.haptic()
+            },
+            onAppend: { text in
+                let snap = BodySnapshot(project: project, label: "追加前备份", body: project.body)
+                context.insert(snap)
+                project.body += (project.body.isEmpty || project.body.hasSuffix("\n") ? "" : "\n") + text
+                project.updatedAt = .now
+                try? context.save()
+                SettingsStore.shared.haptic()
+            })
     }
 }
 
-/// 文本文件导入器（对应 Android: 导入正文，文件≤300MiB）
+/// 文本文件导入器（对应 Android: 导入正文，文件≤300MiB，导入预览）
 struct TextImportSheet: View {
-    let onImport: (String) -> Void
+    let onReplace: (String) -> Void
+    let onAppend: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var showImporter = false
     @State private var error: String?
@@ -164,38 +183,77 @@ struct TextImportSheet: View {
         NavigationStack {
             VStack(spacing: 16) {
                 if let preview {
-                    ScrollView { Text(preview.prefix(1200)).font(.caption).padding() }
-                    Button("替换正文（原正文会先备份为快照）") {
-                        onImport(preview)
-                        dismiss()
+                    VStack(spacing: 6) {
+                        Text("预览（前 1200 字，共 \(preview.count) 字）")
+                            .font(.caption).foregroundStyle(.secondary)
+                        ScrollView { Text(preview.prefix(1200)).font(.caption).padding() }
                     }
-                    .buttonStyle(.borderedProminent)
+                    VStack(spacing: 10) {
+                        Button("替换正文（原正文自动备份为快照）") {
+                            onReplace(preview); dismiss()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("追加到正文末尾") {
+                            onAppend(preview); dismiss()
+                        }
+                        .buttonStyle(.bordered)
+                    }
                 } else {
                     ContentUnavailableView("导入正文", systemImage: "doc.badge.plus",
-                                           description: Text("支持 .txt / .md 纯文本文件"))
+                                           description: Text("支持 .txt / .md 纯文本文件\n自动识别 UTF-8 与 GBK（GB18030）编码"))
                     Button("选择文件") { showImporter = true }
+                        .buttonStyle(.borderedProminent)
                 }
                 if let error { Text(error).foregroundStyle(.red).font(.caption) }
             }
+            .padding()
             .fileImporter(isPresented: $showImporter,
                           allowedContentTypes: [.plainText, .text, UTType(filenameExtension: "md") ?? .text]) { result in
                 guard case .success(let url) = result else { return }
                 do {
                     let accessing = url.startAccessingSecurityScopedResource()
                     defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                    let size = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? 0
+                    let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
                     if size > 300 * 1024 * 1024 {
                         error = "文件超过 300 MiB"
                         return
                     }
-                    preview = try String(contentsOf: url, encoding: .utf8)
+                    let data = try Data(contentsOf: url)
+                    guard let text = Self.decode(data) else {
+                        error = "无法识别文件编码（已尝试 UTF-8 / GB18030）"
+                        return
+                    }
+                    preview = text
                 } catch {
                     self.error = "读取失败：\(error.localizedDescription)"
                 }
             }
             .navigationTitle("导入正文")
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } } }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    if preview != nil {
+                        Button("重新选择") { preview = nil; showImporter = true }
+                    }
+                }
+            }
         }
+    }
+
+    /// UTF-8 优先，失败回退 GB18030（Windows 记事本导出的中文小说常见 GBK）
+    static func decode(_ data: Data) -> String? {
+        var d = data
+        // 去 BOM
+        if d.starts(with: [0xEF, 0xBB, 0xBF]) { d.removeFirst(3) }
+        if d.starts(with: [0xFF, 0xFE]) { return String(data: d, encoding: .utf16LittleEndian) }
+        if d.starts(with: [0xFE, 0xFF]) { return String(data: d, encoding: .utf16BigEndian) }
+        if let s = String(data: d, encoding: .utf8) { return s }
+        let gb = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(
+            CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
+        if let s = String(data: d, encoding: gb) { return s }
+        return nil
     }
 }
 

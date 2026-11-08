@@ -21,17 +21,18 @@ struct BookshelfView: View {
             Group {
                 if filtered.isEmpty {
                     ContentUnavailableView("暂无项目", systemImage: "books.vertical",
-                                           description: Text("点按右上角 + 新建书目"))
+                                           description: Text("点按右上角 + 新建书目\n使用教程在「设置」页顶部"))
                 } else {
                     ScrollView {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 16)], spacing: 16) {
                             ForEach(filtered) { p in
-                                NavigationLink(value: p) {
+                                NavigationLink {
+                                    ProjectWorkspaceView(project: p)
+                                } label: {
                                     BookCoverCard(project: p)
                                 }
                                 .buttonStyle(.plain)
                                 .contextMenu {
-                                    NavigationLink("打开回收站") { TrashView() }
                                     Divider()
                                     Button("创建分支", systemImage: "git-branch-create") {
                                         branch(of: p)
@@ -51,9 +52,6 @@ struct BookshelfView: View {
                 }
             }
             .navigationTitle("我的书架")
-            .navigationDestination(for: BookProject.self) { p in
-                ProjectWorkspaceView(project: p)
-            }
             .searchable(text: $searchText, prompt: "搜索书名")
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {

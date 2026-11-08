@@ -13,6 +13,13 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("帮助") {
+                    NavigationLink {
+                        HelpView()
+                    } label: {
+                        Label("使用教程（先看这个）", systemImage: "questionmark.circle")
+                    }
+                }
                 credentialSection
                 modelSection
                 budgetSection

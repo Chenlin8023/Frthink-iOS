@@ -49,7 +49,7 @@ struct RulesView: View {
         .navigationTitle("规则")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Button("归纳") { showInduct = true }.disabled(project.body.isEmpty)
+                Button("归纳") { showInduct = true }
             }
         }
         .sheet(isPresented: $showInduct) { RuleInductSheet(project: project) }
@@ -81,12 +81,14 @@ struct RuleInductSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
+                if project.body.isEmpty { EmptyBodyHint() }
                 if running {
                     ProgressView(); Text("正在归纳…")
                     Button("停止归纳", role: .destructive) { task?.cancel() }
                 } else {
                     Text(added == 0 ? "从正文归纳可迁移的写作规则（只增不减）" : "已归纳 \(added) 条规则")
                     Button("开始归纳") { run() }.buttonStyle(.borderedProminent)
+                        .disabled(project.body.isEmpty)
                 }
                 Spacer()
             }

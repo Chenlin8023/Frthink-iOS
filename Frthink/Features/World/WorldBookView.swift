@@ -136,7 +136,7 @@ struct CorpusListView: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("语料收集") { showCollect = true }.disabled(project.body.isEmpty)
+                    Button("语料收集") { showCollect = true }
                 }
             }
             .navigationTitle("语料库")
@@ -158,6 +158,7 @@ struct CorpusCollectSheet: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 16) {
+                if project.body.isEmpty { EmptyBodyHint() }
                 if running {
                     ProgressView()
                     Text(progress)
@@ -165,6 +166,7 @@ struct CorpusCollectSheet: View {
                 } else {
                     Text(collected == 0 ? "从正文中收集设定事实到语料库" : "已收集 \(collected) 条语料")
                     Button("开始收集") { run() }.buttonStyle(.borderedProminent)
+                        .disabled(project.body.isEmpty)
                 }
                 Spacer()
             }

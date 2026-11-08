@@ -17,7 +17,10 @@ struct CharacterCardsView: View {
         List {
             if project.characterCards.isEmpty {
                 ContentUnavailableView("暂无人物卡", systemImage: "person.2",
-                                       description: Text("点按右上角新建，或用「人物整理」从正文提取"))
+                                       description: Text("右上角 ✨ = AI 从正文自动提取人物（推荐）\n右上角 + = 手动新建"))
+            }
+            if project.body.isEmpty {
+                Section { EmptyBodyHint() }
             }
             ForEach(groups.keys.sorted(), id: \.self) { g in
                 Section(g) {
@@ -35,7 +38,6 @@ struct CharacterCardsView: View {
                 Button {
                     showOrganize = true
                 } label: { Image(systemName: "sparkles") }
-                .disabled(project.body.isEmpty)
                 Button {
                     editingCard = nil
                     showEditor = true
@@ -165,6 +167,9 @@ struct CharacterOrganizeSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
+                if project.body.isEmpty {
+                    EmptyBodyHint()
+                }
                 HStack {
                     if running {
                         ProgressView().padding(.trailing, 4)
@@ -178,6 +183,7 @@ struct CharacterOrganizeSheet: View {
                         Button("停止", role: .destructive) { task?.cancel() }
                     } else {
                         Button("开始整理") { run() }.buttonStyle(.borderedProminent)
+                            .disabled(project.body.isEmpty)
                     }
                 }
                 if !log.isEmpty {

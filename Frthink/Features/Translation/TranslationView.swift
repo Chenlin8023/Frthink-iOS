@@ -21,6 +21,9 @@ struct TranslationView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            if project.body.isEmpty {
+                EmptyBodyHint().padding(.horizontal).padding(.top, 8)
+            }
             HStack {
                 Picker("目标语言", selection: $targetLang) {
                     ForEach(["英语", "日语", "中文", "韩语", "法语"], id: \.self) { Text($0) }
