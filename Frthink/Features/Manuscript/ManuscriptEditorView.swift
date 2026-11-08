@@ -80,13 +80,14 @@ struct ManuscriptEditorView: View {
     }
 }
 
-/// 文本文件导入器（对应 Android: 导入正文，文件≤300MiB，导入预览，GBK 与 UTF-8 双编码）
+/// 文本文件导入器（对应 Android: 导入正文，文件≤300MiB，导入预览，多编码识别 + 粘贴导入备用路径）
 struct TextImportSheet: View {
     let onReplace: (String) -> Void
     let onAppend: (String) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var showImporter = false
     @State private var error: String?
+    @State private var diagnostic: String?
     @State private var preview: String?
 
     var body: some View {
@@ -110,42 +111,30 @@ struct TextImportSheet: View {
                     }
                 } else {
                     ContentUnavailableView("导入正文", systemImage: "doc.badge.plus",
-                                           description: Text("选择任意文件即可（推荐 .txt / .md）\n自动识别 UTF-8 / UTF-16 / GBK 编码"))
-                    Button("选择文件") { showImporter = true }
+                                           description: Text("选文件或直接粘贴均可（推荐 .txt / .md）\n自动识别 UTF-8 / UTF-16 / GBK 编码"))
+                    Button("从文件选择…") { showImporter = true }
                         .buttonStyle(.borderedProminent)
+                    Button("粘贴剪贴板文本导入") { pasteImport() }
+                        .buttonStyle(.bordered)
                 }
-                if let error { Text(error).foregroundStyle(.red).font(.caption) }
+                if let error { Text(error).foregroundStyle(.red).font(.caption).multilineTextAlignment(.center) }
+                if let diagnostic {
+                    Text(diagnostic)
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .multilineTextAlignment(.center)
+                }
             }
             .padding()
-            // 注意：这里必须用 .data 放行——微信/QQ/网盘传出的 .txt 常被系统标记为 public.data
-            // （不符合 public.plain-text），按 .plainText/.text 过滤会被文件选择器置灰无法选中
-            .fileImporter(isPresented: $showImporter,
-                          allowedContentTypes: [.data]) { result in
-                guard case .success(let url) = result else { return }
-                do {
-                    let accessing = url.startAccessingSecurityScopedResource()
-                    defer { if accessing { url.stopAccessingSecurityScopedResource() } }
-                    let ext = url.pathExtension.lowercased()
-                    let binaryExts: Set<String> = ["doc", "docx", "pdf", "epub", "mobi", "azw3",
-                                                   "jpg", "jpeg", "png", "gif", "zip", "rar", "7z"]
-                    if binaryExts.contains(ext) {
-                        error = "「.\(ext)」是二进制格式，请先转成 .txt 再导入"
-                        return
-                    }
-                    let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-                    if size > 300 * 1024 * 1024 {
-                        error = "文件超过 300 MiB"
-                        return
-                    }
-                    let data = try Data(contentsOf: url)
-                    guard let text = Self.decode(data) else {
-                        error = "无法识别文件编码（已尝试 UTF-8 / UTF-16 / GB18030）"
-                        return
-                    }
-                    preview = text
-                } catch {
-                    self.error = "读取失败：\(error.localizedDescription)"
-                }
+            // 用 UIKit 文档选择器而非 SwiftUI fileImporter——后者在 sheet 内存在 iOS 17 选完回调不触发的 bug；
+            // asCopy:true 直接拿系统复制好的副本，绕开安全作用域与云占位符问题
+            .sheet(isPresented: $showImporter) {
+                DocumentPicker(
+                    onPick: { url in
+                        showImporter = false
+                        handlePick(url)
+                    },
+                    onCancel: { showImporter = false })
             }
             .navigationTitle("导入正文")
             .toolbar {
@@ -154,11 +143,75 @@ struct TextImportSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if preview != nil {
-                        Button("重新选择") { preview = nil; showImporter = true }
+                        Button("重新选择") { preview = nil; error = nil; diagnostic = nil }
                     }
                 }
             }
         }
+    }
+
+    // MARK: 文件导入（asCopy 副本 + 二次复制到临时目录双保险，规避云占位符/第三方提供方读取问题）
+
+    private func handlePick(_ url: URL) {
+        error = nil; diagnostic = nil
+        do {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+
+            let ext = url.pathExtension.lowercased()
+            let binaryExts: Set<String> = ["doc", "docx", "pdf", "epub", "mobi", "azw3",
+                                           "jpg", "jpeg", "png", "gif", "zip", "rar", "7z"]
+            if binaryExts.contains(ext) {
+                error = "「.\(ext)」是二进制格式，请先转成 .txt 再导入"
+                diagnostic = "文件：\(url.lastPathComponent)"
+                return
+            }
+
+            var data = Data()
+            var readVia = ""
+            let tmp = FileManager.default.temporaryDirectory
+                .appendingPathComponent("import-\(UUID().uuidString)-\(url.lastPathComponent)")
+            do {
+                try FileManager.default.copyItem(at: url, to: tmp)   // 再复制一层（最稳）
+                data = try Data(contentsOf: tmp)
+                readVia = "copy"
+                try? FileManager.default.removeItem(at: tmp)
+            } catch {
+                data = try Data(contentsOf: url)                     // 复制失败回退直读
+                readVia = "direct"
+            }
+
+            if data.count > 300 * 1024 * 1024 {
+                error = "文件超过 300 MiB"
+                diagnostic = "文件：\(url.lastPathComponent) · \(data.count) 字节"
+                return
+            }
+            guard let text = Self.decode(data) else {
+                error = "无法识别文件编码（已尝试 UTF-8 / UTF-16 / GB18030）"
+                diagnostic = self.diag(url, data, readVia)
+                return
+            }
+            diagnostic = "\(diag(url, data, readVia)) · 编码已识别 ✓"
+            preview = text
+        } catch {
+            self.error = "读取失败：\(error.localizedDescription)"
+            diagnostic = diag(url, Data(), "?")
+        }
+    }
+
+    private func pasteImport() {
+        error = nil; diagnostic = nil
+        guard let text = UIPasteboard.general.string, !text.isEmpty else {
+            error = "剪贴板没有文本内容（先在别处复制正文）"
+            return
+        }
+        diagnostic = "来源：剪贴板 · \(text.utf8.count) 字节"
+        preview = text
+    }
+
+    private func diag(_ url: URL, _ data: Data, _ via: String) -> String {
+        let head = data.isEmpty ? "-" : data.prefix(8).map { String(format: "%02X", $0) }.joined(separator: " ")
+        return "文件：\(url.lastPathComponent) · \(data.count) 字节 · 读取：\(via) · 头部：\(head)"
     }
 
     /// UTF-8 优先；大量 0x00 字节 → 无 BOM 的 UTF-16；失败回退 GB18030（Windows 记事本导出的中文小说常见 GBK）
@@ -179,6 +232,40 @@ struct TextImportSheet: View {
             CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
         if let s = String(data: d, encoding: gb) { return s }
         return nil
+    }
+}
+
+/// UIKit 文档选择器封装（asCopy:true 直接返回系统复制好的文件副本）
+/// 不用 SwiftUI fileImporter：其在 sheet 内存在 iOS 17 选完回调不触发的 bug
+struct DocumentPicker: UIViewControllerRepresentable {
+    var onPick: (URL) -> Void
+    var onCancel: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick, onCancel: onCancel) }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.data], asCopy: true)
+        picker.allowsMultipleSelection = false
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+        let onCancel: () -> Void
+        init(onPick: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
+            self.onPick = onPick
+            self.onCancel = onCancel
+        }
+        func documentPicker(_ controller: UIDocumentPickerViewController,
+                            didPickDocumentsAt urls: [URL]) {
+            if let u = urls.first { onPick(u) }
+        }
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onCancel()
+        }
     }
 }
 
