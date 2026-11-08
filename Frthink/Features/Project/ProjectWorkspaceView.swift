@@ -9,8 +9,8 @@ struct ProjectWorkspaceView: View {
     @Bindable var project: BookProject
     @Environment(\.modelContext) private var context
 
-    private enum Section: Hashable { case manuscript, chat, cards, world, events }
-    @State private var section: Section = .manuscript
+    private enum Tab: Hashable { case manuscript, chat, cards, world, events }
+    @State private var section: Tab = .manuscript
 
     // 书稿
     @State private var showImporter = false
@@ -40,21 +40,21 @@ struct ProjectWorkspaceView: View {
                                  findReplace: $showFindReplace, chapterNav: $showChapterNav,
                                  promptPreview: $showPromptPreview)
                 .tabItem { Label("书稿", systemImage: "doc.text") }
-                .tag(Section.manuscript)
+                .tag(Tab.manuscript)
             ChatView(project: project)
                 .tabItem { Label("对话", systemImage: "bubble.left.and.bubble.right") }
-                .tag(Section.chat)
+                .tag(Tab.chat)
             CharacterCardsView(project: project, organizeSheet: $showOrganize,
                                newCardRequest: $showNewCard)
                 .tabItem { Label("人物", systemImage: "person.2") }
-                .tag(Section.cards)
+                .tag(Tab.cards)
             WorldBookView(project: project, corpusSheet: $showCorpus,
                           newEntryRequest: $showWorldEntryEditor)
                 .tabItem { Label("世界", systemImage: "globe.asia.australia") }
-                .tag(Section.world)
+                .tag(Tab.world)
             EventsView(project: project, extractSheet: $showExtractEvents)
                 .tabItem { Label("事件", systemImage: "list.bullet.rectangle") }
-                .tag(Section.events)
+                .tag(Tab.events)
         }
         .navigationTitle(project.title)
         .navigationBarTitleDisplayMode(.inline)
