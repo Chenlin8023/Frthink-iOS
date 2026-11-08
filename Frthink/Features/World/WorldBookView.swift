@@ -188,7 +188,7 @@ struct CorpusCollectSheet: View {
         只依据正文；不猜测；只输出资料未包含的新信息；不写剧情事件。
         每行输出一条事实，没有新增只输出 NO_ADDITIONS。
         """
-        running = true; collected = 0
+        running = true; collected = 0; errorText = nil
         guard let cred0 = SettingsStore.shared.activeCredential else { running = false; return }
         var cred = cred0
         let m = SettingsStore.shared.model(for: "extract")
