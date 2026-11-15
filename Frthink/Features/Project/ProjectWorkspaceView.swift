@@ -62,7 +62,7 @@ struct ProjectWorkspaceView: View {
                     Button { showStudio = true } label: {
                         Label("准备", systemImage: "checklist")
                     }
-                    Button("续写") { showPromptPreview = true }
+                    Button("续写") { section = .write }
                 }
                 Menu {
                     Button("提示词编排", systemImage: "list.number") { showPromptStudio = true }
