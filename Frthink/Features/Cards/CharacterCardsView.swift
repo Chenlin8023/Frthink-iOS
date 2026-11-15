@@ -159,17 +159,11 @@ struct CharacterOrganizeSheet: View {
     @State private var log: [String] = []
     @State private var showSys = ""
     @State private var showUser = ""
-    @State private var showRange = false
 
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text("分析范围：\(WorkRangeStore.label(for: project))")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("更改") { showRange = true }.font(.caption)
-                }
+                AnalysisScopeHeader(project: project) { refreshTemplate() }
                 if project.body.isEmpty {
                     EmptyBodyHint()
                 }
@@ -178,7 +172,7 @@ struct CharacterOrganizeSheet: View {
                         ProgressView().padding(.trailing, 4)
                         Text(progress)
                     } else {
-                        Text(processed == 0 ? "将把选定的正文分段整理为人物卡（增量模式，只增不减）"
+                        Text(processed == 0 ? "将把锚前正文分段整理为人物卡（增量模式，只增不减）"
                              : "已处理 \(processed) 段，新建 \(newCount) 张人物卡")
                     }
                     Spacer()
@@ -208,16 +202,12 @@ struct CharacterOrganizeSheet: View {
             .padding()
             .navigationTitle("人物整理")
             .onAppear { refreshTemplate() }
-            .sheet(isPresented: $showRange) { WorkRangePickerSheet(project: project) }
-            .onChange(of: showRange) { _, showing in
-                if !showing { refreshTemplate() }
-            }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("关闭") { task?.cancel(); dismiss() } } }
         }
     }
 
     private func refreshTemplate() {
-        let source = WorkRangeStore.text(for: project)
+        let source = AnalysisScope.text(for: project)
         let segments = PromptBuilder.segments(of: source, budget: SettingsStore.shared.segmentBudget)
         if let s0 = segments.first {
             let c0 = PromptBuilder.compileCharacterExtraction(project: project,
@@ -229,12 +219,12 @@ struct CharacterOrganizeSheet: View {
     }
 
     private func run() {
-        let source = WorkRangeStore.text(for: project)
+        let source = AnalysisScope.text(for: project)
         let segments = PromptBuilder.segments(of: source, budget: SettingsStore.shared.segmentBudget)
         refreshTemplate()
         running = true
         processed = 0; newCount = 0; log = []
-        log.append("分析范围：\(WorkRangeStore.label(for: project))，共 \(segments.count) 段")
+        log.append("作用范围：\(AnalysisScope.label(for: project))，共 \(segments.count) 段")
         processed = 0; newCount = 0; log = []
         guard let cred = SettingsStore.shared.activeCredential else {
             log.append("尚未配置凭证"); running = false; return

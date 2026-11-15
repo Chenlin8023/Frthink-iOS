@@ -15,11 +15,10 @@ struct ProjectWorkspaceView: View {
     // 书稿
     @State private var showImporter = false
     @State private var showFindReplace = false
-    @State private var showChapterNav = false
+    @State private var showAnchor = false
     @State private var showPromptPreview = false
     @State private var findText = ""
     @State private var replaceText = ""
-    @State private var rangeTick = 0
     // 人物
     @State private var showOrganize = false
     @State private var showNewCard = false
@@ -33,14 +32,14 @@ struct ProjectWorkspaceView: View {
     @State private var showRules = false
     @State private var showSnapshots = false
     @State private var showHelp = false
-    // 制作台（P0：骨架五段 + 基座自检）与内容档案
+    // 准备工作向导（取代 P0 的制作台）与内容档案
     @State private var showStudio = false
     @State private var showContentPlan = false
 
     var body: some View {
         TabView(selection: $section) {
             ManuscriptEditorView(project: project, importer: $showImporter,
-                                 findReplace: $showFindReplace, chapterNav: $showChapterNav,
+                                 findReplace: $showFindReplace, anchorSheet: $showAnchor,
                                  promptPreview: $showPromptPreview)
                 .tabItem { Label("书稿", systemImage: "doc.text") }
                 .tag(Tab.manuscript)
@@ -71,10 +70,10 @@ struct ProjectWorkspaceView: View {
             }
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if section == .manuscript {
-                    Button("续写") { showPromptPreview = true }
                     Button { showStudio = true } label: {
-                        Label("制作台", systemImage: "slider.horizontal.3")
+                        Label("准备", systemImage: "checklist")
                     }
+                    Button("续写") { showPromptPreview = true }
                 }
                 if section == .cards {
                     Button { showOrganize = true } label: {
@@ -96,9 +95,6 @@ struct ProjectWorkspaceView: View {
                     Button("提取事件") { showExtractEvents = true }
                 }
                 Menu {
-                    Button("制作台（结构/大纲/状态/重制）", systemImage: "slider.horizontal.3") { showStudio = true }
-                    Button("基调与尺度", systemImage: "text.book.closed") { showContentPlan = true }
-                    Divider()
                     Button("翻译（逐段导出）", systemImage: "character.book.closed") { showTranslation = true }
                     Button("长期规则（文风归纳）", systemImage: "text.badge.checkmark") { showRules = true }
                     Button("快照（正文版本备份）", systemImage: "clock.arrow.circlepath") { showSnapshots = true }
@@ -107,7 +103,6 @@ struct ProjectWorkspaceView: View {
                     Button("导出书项目 (.json)", systemImage: "square.and.arrow.up") { export() }
                     Divider()
                     Button("查找与替换", systemImage: "magnifyingglass") { showFindReplace = true }
-                    Button("章节导航", systemImage: "list.bullet.indent") { showChapterNav = true }
                     Divider()
                     Button("使用教程", systemImage: "questionmark.circle") { showHelp = true }
                 } label: {
@@ -118,7 +113,7 @@ struct ProjectWorkspaceView: View {
         // 书稿
         .sheet(isPresented: $showImporter) { importSheet }
         .sheet(isPresented: $showFindReplace) { findReplaceSheet }
-        .sheet(isPresented: $showChapterNav) { chapterNavSheet }
+        .sheet(isPresented: $showAnchor) { AnchorSheet(project: project) }
         .sheet(isPresented: $showPromptPreview) { ContinuationSheet(project: project) }
         // 人物 / 世界 / 事件
         .sheet(isPresented: $showOrganize) { CharacterOrganizeSheet(project: project) }
@@ -127,7 +122,17 @@ struct ProjectWorkspaceView: View {
         .sheet(isPresented: $showCorpus) { CorpusListView(project: project) }
         .sheet(isPresented: $showExtractEvents) { EventExtractSheet(project: project) }
         // ··· 二级页（全屏，右上角「完成」关闭）
-        .fullScreenCover(isPresented: $showStudio) { ModalPage { StudioView(project: project) } }
+        .fullScreenCover(isPresented: $showStudio) {
+            ModalPage {
+                SetupWizardView(project: project,
+                                onImport: { openFromWizard { showImporter = true } },
+                                onOrganize: { openFromWizard { showOrganize = true } },
+                                onCorpus: { openFromWizard { showCorpus = true } },
+                                onRules: { openFromWizard { showRules = true } },
+                                onContentPlan: { openFromWizard { showContentPlan = true } },
+                                onContinue: { openFromWizard { showPromptPreview = true } })
+            }
+        }
         .fullScreenCover(isPresented: $showContentPlan) { ModalPage { ContentPlanEditor(project: project) } }
         .fullScreenCover(isPresented: $showTranslation) { ModalPage { TranslationView(project: project) } }
         .fullScreenCover(isPresented: $showRules) { ModalPage { RulesView(project: project) } }
@@ -137,6 +142,12 @@ struct ProjectWorkspaceView: View {
     }
 
     // MARK: ··· 菜单动作
+
+    /// 向导内的二级入口：先关向导再开目标（避免 fullScreenCover 叠层冲突）
+    private func openFromWizard(_ action: @escaping () -> Void) {
+        showStudio = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { action() }
+    }
 
     private func saveSnapshot() {
         context.insert(BodySnapshot(project: project, label: "手动快照", body: project.body))
@@ -178,66 +189,6 @@ struct ProjectWorkspaceView: View {
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showFindReplace = false } } }
         }
         .presentationDetents([.medium])
-    }
-
-    private var chapterNavSheet: some View {
-        NavigationStack {
-            List {
-                chapterNavSections
-            }
-            .navigationTitle("章节导航")
-            .id(rangeTick)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { showChapterNav = false } } }
-        }
-        .presentationDetents([.large])
-    }
-
-    @ViewBuilder
-    private var chapterNavSections: some View {
-        let chapters = PromptBuilder.chapterRanges(in: project.body)
-        if chapters.isEmpty {
-            Text("没有识别到章节标题").foregroundStyle(.secondary)
-        }
-        Section("点击章节：设定分析范围 / 锚定续写位置") {
-            ForEach(Array(chapters.enumerated()), id: \.offset) { pair in
-                let next = pair.offset + 1 < chapters.count ? chapters[pair.offset + 1].offset : project.body.count
-                chapterRow(title: pair.element.title, start: pair.element.offset, end: next)
-            }
-        }
-        Section {
-            Text("当前分析范围：\(WorkRangeStore.label(for: project))")
-                .font(.caption).foregroundStyle(.secondary)
-            if let a = project.anchorOffset {
-                Text("当前续写锚：第 \(a) 字").font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private func chapterRow(title: String, start: Int, end: Int) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(title)
-            Text("第 \(start)–\(end) 字 · 约 \(end - start) 字")
-                .font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button {
-                    WorkRangeStore.set(WorkRange(start: start, end: end), for: project)
-                    rangeTick += 1
-                } label: {
-                    Label("设为分析范围", systemImage: "text.magnifyingglass")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-                Button {
-                    project.anchorOffset = start
-                    try? context.save()
-                    rangeTick += 1
-                } label: {
-                    Label("锚定续写", systemImage: "anchor")
-                        .font(.caption)
-                }
-                .buttonStyle(.bordered)
-            }
-        }
     }
 
     private var importSheet: some View {

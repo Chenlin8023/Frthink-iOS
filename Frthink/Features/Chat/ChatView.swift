@@ -46,7 +46,7 @@ struct ChatView: View {
             }
             HStack(alignment: .bottom, spacing: 8) {
                 Button {
-                    pendingInstruction = "从书稿结尾之后继续写下去。"
+                    pendingInstruction = "从续写锚之后继续写下去。"
                     showPromptPreview = true
                 } label: {
                     Image(systemName: "anchor")

@@ -10,7 +10,7 @@ struct ManuscriptEditorView: View {
     @Bindable var project: BookProject
     @Binding var importer: Bool
     @Binding var findReplace: Bool
-    @Binding var chapterNav: Bool
+    @Binding var anchorSheet: Bool
     @Binding var promptPreview: Bool
     @Environment(\.modelContext) private var context
 
@@ -23,9 +23,11 @@ struct ManuscriptEditorView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "anchor")
                         .font(.caption)
-                    Text("续写锚：第 \(anchor) 字处")
+                    Text("续写锚：第 \(anchor) 字 · 锚前 \(AnalysisScope.chapterCount(beforeAnchorOf: project)) 章")
                         .font(.caption)
                     Spacer()
+                    Button("调整") { anchorSheet = true }
+                        .font(.caption)
                     Button("取消锚") { project.anchorOffset = nil; try? context.save() }
                         .font(.caption)
                 }
@@ -43,11 +45,9 @@ struct ManuscriptEditorView: View {
                 Text("\(project.wordCount) 字").monospacedDigit()
                 if project.anchorOffset == nil {
                     Button {
-                        project.anchorOffset = project.body.count
-                        try? context.save()
-                        SettingsStore.shared.haptic()
+                        anchorSheet = true
                     } label: {
-                        Label("放置续写锚", systemImage: "anchor")
+                        Label("设置续写锚", systemImage: "anchor")
                     }
                 }
                 Spacer()
@@ -63,7 +63,7 @@ struct ManuscriptEditorView: View {
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Button { findReplace = true } label: { Image(systemName: "magnifyingglass") }
-                Button { chapterNav = true } label: { Image(systemName: "list.bullet.indent") }
+                Button { anchorSheet = true } label: { Image(systemName: "anchor") }
                 Button {
                     project.bookmarkOffset = project.body.count
                     try? context.save()
