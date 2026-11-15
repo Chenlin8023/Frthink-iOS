@@ -1,7 +1,7 @@
 import SwiftUI
 import SwiftData
 
-/// 项目工作台（对应 Android: 书稿 / 对话 / 人物 / 世界 / 事件 + 翻译 / 规则 / 快照）
+/// 项目工作台：书稿 / 续写 / 功能区（三个页签，酒馆式：主场景 + 面板）。
 /// 重要：所有导航栏按钮统一声明在本层（按当前页签条件显示）。
 /// iOS 17 在外层已声明 .toolbar 时，TabView 子视图里的导航栏工具条项会被静默丢弃，
 /// 所以子视图只保留键盘工具条与内部 sheet，导航栏入口全部在这里。
@@ -9,7 +9,7 @@ struct ProjectWorkspaceView: View {
     @Bindable var project: BookProject
     @Environment(\.modelContext) private var context
 
-    private enum Tab: Hashable { case manuscript, chat, cards, world, events }
+    private enum Tab: Hashable { case manuscript, write, archive }
     @State private var section: Tab = .manuscript
 
     // 书稿
@@ -19,23 +19,16 @@ struct ProjectWorkspaceView: View {
     @State private var showPromptPreview = false
     @State private var findText = ""
     @State private var replaceText = ""
-    // 人物
-    @State private var showOrganize = false
-    @State private var showNewCard = false
-    // 世界
-    @State private var showWorldEntryEditor = false
-    @State private var showCorpus = false
-    // 事件
-    @State private var showExtractEvents = false
+    // 功能区定位请求（向导 / 菜单可以把用户直接送到某个分区）
+    @State private var archiveRequest: ArchivePane?
     // ··· 菜单二级页
     @State private var showTranslation = false
-    @State private var showRules = false
     @State private var showSnapshots = false
     @State private var showHelp = false
-    // 准备工作向导（取代 P0 的制作台）与内容档案
     @State private var showStudio = false
     @State private var showContentPlan = false
     @State private var showPromptStudio = false
+    @State private var showDirectory = false
 
     var body: some View {
         TabView(selection: $section) {
@@ -45,19 +38,11 @@ struct ProjectWorkspaceView: View {
                 .tabItem { Label("书稿", systemImage: "doc.text") }
                 .tag(Tab.manuscript)
             ChatView(project: project)
-                .tabItem { Label("对话", systemImage: "bubble.left.and.bubble.right") }
-                .tag(Tab.chat)
-            CharacterCardsView(project: project, organizeSheet: $showOrganize,
-                               newCardRequest: $showNewCard)
-                .tabItem { Label("人物", systemImage: "person.2") }
-                .tag(Tab.cards)
-            WorldBookView(project: project, corpusSheet: $showCorpus,
-                          newEntryRequest: $showWorldEntryEditor)
-                .tabItem { Label("世界", systemImage: "globe.asia.australia") }
-                .tag(Tab.world)
-            EventsView(project: project, extractSheet: $showExtractEvents)
-                .tabItem { Label("事件", systemImage: "list.bullet.rectangle") }
-                .tag(Tab.events)
+                .tabItem { Label("续写", systemImage: "bubble.left.and.bubble.right") }
+                .tag(Tab.write)
+            ArchiveView(project: project, requestPane: $archiveRequest)
+                .tabItem { Label("功能区", systemImage: "square.grid.2x2") }
+                .tag(Tab.archive)
         }
         .navigationTitle(project.title)
         .navigationBarTitleDisplayMode(.inline)
@@ -66,6 +51,9 @@ struct ProjectWorkspaceView: View {
                 if section == .manuscript {
                     Button { showImporter = true } label: {
                         Label("导入正文", systemImage: "square.and.arrow.down")
+                    }
+                    Button { showDirectory = true } label: {
+                        Label("目录", systemImage: "list.bullet.indent")
                     }
                 }
             }
@@ -76,36 +64,16 @@ struct ProjectWorkspaceView: View {
                     }
                     Button("续写") { showPromptPreview = true }
                 }
-                if section == .cards {
-                    Button { showOrganize = true } label: {
-                        Label("人物整理", systemImage: "sparkles")
-                    }
-                    Button { showNewCard = true } label: {
-                        Label("新建人物卡", systemImage: "plus")
-                    }
-                }
-                if section == .world {
-                    Button { showCorpus = true } label: {
-                        Label("语料库", systemImage: "books.vertical")
-                    }
-                    Button { showWorldEntryEditor = true } label: {
-                        Label("新增词条", systemImage: "plus")
-                    }
-                }
-                if section == .events {
-                    Button("提取事件") { showExtractEvents = true }
-                }
                 Menu {
-                    Button("翻译（逐段导出）", systemImage: "character.book.closed") { showTranslation = true }
-                    Button("长期规则（文风归纳）", systemImage: "text.badge.checkmark") { showRules = true }
                     Button("提示词编排", systemImage: "list.number") { showPromptStudio = true }
-                    Button("快照（正文版本备份）", systemImage: "clock.arrow.circlepath") { showSnapshots = true }
+                    Button("基调与尺度", systemImage: "text.book.closed") { showContentPlan = true }
                     Divider()
+                    Button("翻译（逐段导出）", systemImage: "character.book.closed") { showTranslation = true }
+                    Button("快照（正文版本备份）", systemImage: "clock.arrow.circlepath") { showSnapshots = true }
                     Button("保存快照", systemImage: "plus.square.on.square") { saveSnapshot() }
                     Button("导出书项目 (.json)", systemImage: "square.and.arrow.up") { export() }
                     Divider()
                     Button("查找与替换", systemImage: "magnifyingglass") { showFindReplace = true }
-                    Divider()
                     Button("使用教程", systemImage: "questionmark.circle") { showHelp = true }
                 } label: {
                     Image(systemName: "ellipsis.circle")
@@ -116,23 +84,18 @@ struct ProjectWorkspaceView: View {
         .sheet(isPresented: $showImporter) { importSheet }
         .sheet(isPresented: $showFindReplace) { findReplaceSheet }
         .sheet(isPresented: $showAnchor) { AnchorSheet(project: project) }
+        .sheet(isPresented: $showDirectory) { ChapterDirectorySheet(project: project, anchorSheet: $showAnchor) }
         .fullScreenCover(isPresented: $showPromptPreview) {
             ModalPage { ContinuationSheet(project: project) }
         }
-        // 人物 / 世界 / 事件
-        .sheet(isPresented: $showOrganize) { CharacterOrganizeSheet(project: project) }
-        .sheet(isPresented: $showNewCard) { CardEditorSheet(project: project, card: nil) }
-        .sheet(isPresented: $showWorldEntryEditor) { WorldEntryEditor(project: project, entry: nil) }
-        .sheet(isPresented: $showCorpus) { CorpusListView(project: project) }
-        .sheet(isPresented: $showExtractEvents) { EventExtractSheet(project: project) }
-        // ··· 二级页（全屏，右上角「完成」关闭）
+        // 准备向导
         .fullScreenCover(isPresented: $showStudio) {
             ModalPage {
                 SetupWizardView(project: project,
                                 onImport: { openFromWizard { showImporter = true } },
-                                onOrganize: { openFromWizard { showOrganize = true } },
-                                onCorpus: { openFromWizard { showCorpus = true } },
-                                onRules: { openFromWizard { showRules = true } },
+                                onOrganize: { openFromWizard { section = .archive; archiveRequest = .character } },
+                                onCorpus: { openFromWizard { section = .archive; archiveRequest = .setting } },
+                                onRules: { openFromWizard { section = .archive; archiveRequest = .style } },
                                 onContentPlan: { openFromWizard { showContentPlan = true } },
                                 onContinue: { openFromWizard { showPromptPreview = true } })
             }
@@ -140,7 +103,6 @@ struct ProjectWorkspaceView: View {
         .fullScreenCover(isPresented: $showContentPlan) { ModalPage { ContentPlanEditor(project: project) } }
         .fullScreenCover(isPresented: $showPromptStudio) { ModalPage { PromptStudioView(project: project) } }
         .fullScreenCover(isPresented: $showTranslation) { ModalPage { TranslationView(project: project) } }
-        .fullScreenCover(isPresented: $showRules) { ModalPage { RulesView(project: project) } }
         .fullScreenCover(isPresented: $showSnapshots) { ModalPage { SnapshotsView(project: project) } }
         .fullScreenCover(isPresented: $showHelp) { ModalPage { HelpView() } }
         .onDisappear { try? context.save() }

@@ -17,7 +17,6 @@ struct ChatView: View {
     @State private var editingMessage: ChatMessage?
     @State private var showPromptStudio = false
     @State private var showAnchorSheet = false
-    @State private var showLibrary = false
 
     private var messages: [ChatMessage] {
         project.messages.sorted { $0.createdAt < $1.createdAt }
@@ -30,12 +29,12 @@ struct ChatView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(messages) { msg in
-                            BubbleView(message: msg, project: project,
+                        ForEach(Array(messages.enumerated()), id: \.offset) { pair in
+                            BubbleView(message: pair.element, project: project, floor: pair.offset + 1,
                                        onContinue: { send(override: "继续往下写，接上文。") },
-                                       onRewrite: { rewrite(msg) },
-                                       onEdit: { editingMessage = msg })
-                                .id(msg.id)
+                                       onRewrite: { rewrite(pair.element) },
+                                       onEdit: { editingMessage = pair.element })
+                                .id(pair.element.id)
                         }
                         if streaming {
                             StreamingBubbleView(content: streamContent, thinking: streamThinking, status: statusText)
@@ -88,7 +87,6 @@ struct ChatView: View {
         }
                 .fullScreenCover(isPresented: $showPromptStudio) { ModalPage { PromptStudioView(project: project) } }
         .fullScreenCover(isPresented: $showAnchorSheet) { ModalPage { AnchorSheet(project: project) } }
-        .fullScreenCover(isPresented: $showLibrary) { ModalPage { LibraryView(project: project) } }
         .sheet(item: $editingMessage) { msg in
             BubbleEditSheet(message: msg)
         }
@@ -111,7 +109,6 @@ struct ChatView: View {
             }
             Spacer()
             headerButton("text.badge.checkmark", "预设") { showPromptStudio = true }
-            headerButton("books.vertical", "资料") { showLibrary = true }
             headerButton("anchor", "锚") { showAnchorSheet = true }
         }
         .padding(.horizontal, 16)
@@ -150,7 +147,7 @@ struct ChatView: View {
             Label("\(corpus) 设定", systemImage: "books.vertical")
             Label("尾部 \(SettingsStore.shared.contextBudget)", systemImage: "text.alignleft")
             Spacer()
-            Button("看提示词") { showPromptStudio = true }
+            Button("看提示词") { showPromptPreview = true }
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
@@ -304,6 +301,7 @@ struct ChatView: View {
 struct BubbleView: View {
     @Bindable var message: ChatMessage
     let project: BookProject
+    var floor: Int? = nil
     var onContinue: (() -> Void)? = nil
     var onRewrite: (() -> Void)? = nil
     var onEdit: (() -> Void)? = nil
@@ -365,6 +363,28 @@ struct BubbleView: View {
         }
     }
 
+    // MARK: 元信息（对齐酒馆气泡：楼层 · 字数 · 估算 token · 时间）
+
+    private var metaLine: some View {
+        HStack(spacing: 8) {
+            Text(isUser ? "你" : "AI").fontWeight(.semibold)
+            if let floor {
+                Text("#\(floor)").monospacedDigit()
+            }
+            Text("\(message.content.count) 字").monospacedDigit()
+            Text("~\(estTokens) tok").monospacedDigit()
+            Spacer()
+            Text(message.createdAt.formatted(date: .omitted, time: .shortened))
+        }
+        .font(.caption2)
+        .foregroundStyle(.tertiary)
+    }
+
+    /// 中文粗估：约 1.5 字 / token
+    private var estTokens: Int {
+        max(1, message.content.count * 2 / 3)
+    }
+
     // MARK: 操作行
 
     private var actionRow: some View {
@@ -399,8 +419,6 @@ struct BubbleView: View {
 
             versionSwitcher
             Spacer()
-            Text(message.createdAt.formatted(date: .omitted, time: .shortened))
-                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 

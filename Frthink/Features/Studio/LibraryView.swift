@@ -234,6 +234,7 @@ struct LibraryRowView: View {
     let detail: String
     var enabled: Bool?
     var onToggle: ((Bool) -> Void)?
+    var onEdit: (() -> Void)? = nil
 
     @State private var open = false
 
@@ -245,6 +246,13 @@ struct LibraryRowView: View {
                 if let enabled, let onToggle {
                     Toggle("", isOn: Binding(get: { enabled }, set: { onToggle($0) }))
                         .labelsHidden()
+                }
+                if let onEdit {
+                    Button { onEdit() } label: {
+                        Image(systemName: "pencil").font(.caption2)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
                 }
             }
             if !subtitle.isEmpty {
