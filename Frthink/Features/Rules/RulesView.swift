@@ -165,7 +165,6 @@ struct RuleInductSheet: View {
 
     /// 从（可被用户修正过的）原始回复按行解析规则并入库
     @discardableResult
-    @discardableResult
     private func saveParsed(_ source: String) -> Int {
         var n = 0
         for line in source.split(separator: "\n") {
