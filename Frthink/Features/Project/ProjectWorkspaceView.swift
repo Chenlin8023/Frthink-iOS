@@ -114,7 +114,9 @@ struct ProjectWorkspaceView: View {
         .sheet(isPresented: $showImporter) { importSheet }
         .sheet(isPresented: $showFindReplace) { findReplaceSheet }
         .sheet(isPresented: $showAnchor) { AnchorSheet(project: project) }
-        .sheet(isPresented: $showPromptPreview) { ContinuationSheet(project: project) }
+        .fullScreenCover(isPresented: $showPromptPreview) {
+            ModalPage { ContinuationSheet(project: project) }
+        }
         // 人物 / 世界 / 事件
         .sheet(isPresented: $showOrganize) { CharacterOrganizeSheet(project: project) }
         .sheet(isPresented: $showNewCard) { CardEditorSheet(project: project, card: nil) }

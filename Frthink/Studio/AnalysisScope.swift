@@ -44,17 +44,17 @@ enum AnalysisScope {
     }
 
     /// 锚前的章节切片（标题 + 起止 offset），按正文顺序
+    /// 用 ChapterIndex 而不是 PromptBuilder.chapterRanges：后者把「第一卷」也当章，会让锚前章数虚高。
     static func chaptersBeforeAnchor(_ project: BookProject) -> [(title: String, start: Int, end: Int)] {
         let end = anchor(of: project)
         guard end > 0 else { return [] }
-        let ranges = PromptBuilder.chapterRanges(in: project.body)
-        guard !ranges.isEmpty else { return [] }
+        let nodes = ChapterIndex.chapters(in: project.body)
+        guard !nodes.isEmpty else { return [] }
         var out: [(title: String, start: Int, end: Int)] = []
-        for (i, r) in ranges.enumerated() where r.offset < end {
-            let next = (i + 1 < ranges.count) ? ranges[i + 1].offset : project.body.count
-            let stop = min(next, end)
-            if stop > r.offset {
-                out.append((title: r.title, start: r.offset, end: stop))
+        for node in nodes where node.start < end {
+            let stop = min(node.end, end)
+            if stop > node.start {
+                out.append((title: node.title, start: node.start, end: stop))
             }
         }
         return out
