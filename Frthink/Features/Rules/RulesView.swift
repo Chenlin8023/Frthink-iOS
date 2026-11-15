@@ -105,7 +105,7 @@ struct RuleInductSheet: View {
                         Text("AI 原始回复（可修正后保存）").font(.caption).foregroundStyle(.secondary)
                         TextEditor(text: $rawText).font(.caption).frame(minHeight: 140)
                             .border(Color.secondary.opacity(0.3))
-                        Button("解析并保存") { saveParsed() }.buttonStyle(.bordered)
+                        Button("解析并保存") { saveParsed(rawText) }.buttonStyle(.bordered)
                     }
                     PromptEditorSection(systemText: $sysText, userText: $userText)
                 }
@@ -138,44 +138,45 @@ struct RuleInductSheet: View {
         rawText = ""
         notice = "0/\(segs.count)"
 
-        var collected: [String] = []
         task = Task {
+            var total = 0
             for (i, seg) in segs.enumerated() {
                 if Task.isCancelled { break }
-                let compiled = PromptBuilder.compileRuleInduction(existingRules: ((try? context.fetch(FetchDescriptor<WritingRule>())) ?? []).filter { $0.project == project && $0.kind == "style" }.map(\.line), segment: seg)
+                let existing = ((try? context.fetch(FetchDescriptor<WritingRule>())) ?? [])
+                    .filter { $0.project == project && $0.kind == "style" }.map(\.line)
+                let compiled = PromptBuilder.compileRuleInduction(existingRules: existing, segment: seg)
                 let spec = AiTaskSpec(slot: .worker, temperature: 0.4, maxTokens: nil,
                                       stage: "rule", taskLabel: "整理")
                 do {
                     let r = try await AiRunner.run(spec: spec, messages: compiled.messages,
                                                    context: context, projectID: project.id)
-                    collected.append(r.text)
+                    rawText = r.text
+                    total += saveParsed(r.text)
                 } catch {
-                    await MainActor.run { errorText = error.localizedDescription }
+                    errorText = error.localizedDescription
                     break
                 }
-                await MainActor.run { notice = "第 \(i + 1)/\(segs.count) 段" }
+                notice = "第 \(i + 1)/\(segs.count) 段 · 累计 \(total) 条"
             }
-            let joined = collected.joined(separator: "\n")
-            await MainActor.run {
-                running = false
-                rawText = joined
-                _ = saveParsed()
-            }
+            running = false
+            notice = "已保存 \(total) 条文风规则（\(segs.count) 段）"
         }
     }
 
     /// 从（可被用户修正过的）原始回复按行解析规则并入库
     @discardableResult
-    private func saveParsed() -> Int {
+    @discardableResult
+    private func saveParsed(_ source: String) -> Int {
         var n = 0
-        for line in rawText.split(separator: "\n") {
+        for line in source.split(separator: "\n") {
             let t = line.trimmingCharacters(in: CharacterSet(charactersIn: "- •*")).trimmingCharacters(in: .whitespaces)
-            if t.isEmpty || t.contains("NO_ADDITIONS") || t == "```" { continue }
+            if t.isEmpty || t.contains("NO_ADDITIONS") || t.hasPrefix("```") { continue }
+            if t.count > 90 { continue }
+            if t.hasPrefix("以上") || t.hasPrefix("说明") || t.hasPrefix("注：") { continue }
             context.insert(WritingRule(project: project, kind: "style", line: t))
             n += 1
         }
-        try? context.save()
-        if n > 0 { notice = "已保存 \(n) 条规则" }
+        if n > 0 { try? context.save() }
         return n
     }
 }

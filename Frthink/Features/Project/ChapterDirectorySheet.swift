@@ -7,7 +7,6 @@ import SwiftData
 /// 仍回到 AnchorSheet，避免两处都能改同一件事。
 struct ChapterDirectorySheet: View {
     @Bindable var project: BookProject
-    @Binding var anchorSheet: Bool
     var onJump: ((Int) -> Void)? = nil
 
     @Environment(\.modelContext) private var context
@@ -35,16 +34,11 @@ struct ChapterDirectorySheet: View {
                 headerSection
                 chapterList
             }
-            .navigationTitle("目录")
+            .navigationTitle("目录（点击跳转正文）")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("关闭") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("精细定位") {
-                        dismiss()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { anchorSheet = true }
-                    }
-                }
+
             }
         }
     }
@@ -104,7 +98,6 @@ struct ChapterDirectorySheet: View {
 
     private func row(_ node: ChapterNode) -> some View {
         Button {
-            setAnchor(node.start)
             onJump?(node.start)
             dismiss()
         } label: {

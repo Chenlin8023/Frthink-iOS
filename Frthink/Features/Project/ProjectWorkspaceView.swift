@@ -83,7 +83,7 @@ struct ProjectWorkspaceView: View {
         .sheet(isPresented: $showImporter) { importSheet }
         .sheet(isPresented: $showFindReplace) { findReplaceSheet }
         .sheet(isPresented: $showAnchor) { AnchorSheet(project: project) }
-        .sheet(isPresented: $showDirectory) { ChapterDirectorySheet(project: project, anchorSheet: $showAnchor, onJump: { pendingJump = $0 }) }
+        .sheet(isPresented: $showDirectory) { ChapterDirectorySheet(project: project, onJump: { pendingJump = $0 }) }
         .fullScreenCover(isPresented: $showPromptPreview) {
             ModalPage { ContinuationSheet(project: project) }
         }

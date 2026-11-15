@@ -124,6 +124,7 @@ enum PromptBuilder {
         - 只依据正文，证据不足则留空，不推测未发生的行动。
         - 只输出本片段新增、且不在已有人物卡中的事实；禁止返回旧信息或整段替换。
         - 先结合上下文判断身份再去重：本名归一，别称归入 aliases；泛称（代词、职业称呼）不单独作为身份依据。
+        - 只输出 JSON 本体，不要 markdown 代码围栏，不要在 JSON 前后写任何解释。
         - 输出严格 JSON：{"characters":[{"name":"","aliases":"","identity":"","goals":"","personality":"","speech":"","memories":"","attitudes":""}]}
         - 没有新人物时输出 {"characters":[]}。不要输出其他内容。
         """)
@@ -145,9 +146,11 @@ enum PromptBuilder {
     ) -> Compiled {
         let system = withGlobalPreset("""
         你是写作规则归纳助手。阅读正文片段，提炼可迁移的写作规则（视角、节奏、对白、心理描写、转场等）。
-        要求：
-        - 只依据正文；不复述剧情，不照搬原句，不猜测。
-        - 只输出已有规则之外的新规则，每行一条，不写标题；没有新增只输出 NO_ADDITIONS。
+要求：
+- 只依据正文；不复述剧情，不照搬原句，不猜测。
+- 输出格式：一行一条规则，不要编号、不要项目符号、不要标题；
+- 每条不超过 60 字，写成可执行的指令（例如"每段对话后跟一句动作"）；
+- 只输出已有规则之外的新规则；没有新增就只输出 NO_ADDITIONS 这一行。
         """)
         var user = "【已有规则】\n"
         user += existingRules.isEmpty ? "（无）\n" : existingRules.map { "- \($0)" }.joined(separator: "\n") + "\n"
@@ -165,9 +168,11 @@ enum PromptBuilder {
     ) -> Compiled {
         let system = withGlobalPreset("""
         你是剧情事件整理助手。以有意义的场景事件为单位提取事件，描述起因、发展和结果。
-        要求：
-        - 已有事件的后续使用完全相同的 title；只返回新增进展，禁止重复已有信息。
-        - 输出严格 JSON：{"events":[{"title":"","cause":"","development":"","result":""}]}；没有新事件输出 {"events":[]}。不要输出其他内容。
+要求：
+- 已有事件的后续使用完全相同的 title；只返回新增进展，禁止重复已有信息。
+- 每条字段一句话，不超过 80 字；不要写人物内心独白。
+- 只输出 JSON 本体，不要 markdown 代码围栏，不要在 JSON 前后写任何解释。
+- 输出严格 JSON：{"events":[{"title":"","cause":"","development":"","result":""}]}；没有新事件输出 {"events":[]}。
         """)
         var user = "【已有事件】\n"
         user += existingTitles.isEmpty ? "（无）\n" : existingTitles.map { "- \($0)" }.joined(separator: "\n") + "\n"
@@ -194,8 +199,12 @@ enum PromptBuilder {
     static func compileCorpusExtraction(segment: String) -> Compiled {
         let system = withGlobalPreset("""
         你是小说设定资料整理助手。从正文中提取世界观、设定、地点、规则类事实。
-        只依据正文；不猜测；只输出资料未包含的新信息；不写剧情事件。
-        每行输出一条事实，没有新增只输出 NO_ADDITIONS。
+只依据正文；不猜测；只输出资料里还没有的新事实；不写剧情事件、不写人物心理。
+输出格式（严格遵守）：
+- 一行一条事实，不要编号、不要项目符号、不要标题；
+- 每条不超过 60 字，陈述句；
+- 不要复述原文句子，不要加"以上""说明"之类的旁白；
+- 没有新事实就只输出 NO_ADDITIONS 这一行。
         """)
         return Compiled(
             messages: [LlmMessage(role: "system", content: system),

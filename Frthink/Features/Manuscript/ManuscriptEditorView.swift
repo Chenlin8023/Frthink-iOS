@@ -18,17 +18,9 @@ struct ManuscriptEditorView: View {
     @State private var lastSaved = Date.now
     @State private var cachedWords = 0
     @State private var cachedChapters = 0
-    @State private var cursorOffset = 0
+    @State private var anchorRequest = false
 
     /// 把续写锚放到当前光标处（精细定位，不必依赖章节）
-    private func setAnchorAtCursor() {
-        let offset = min(max(cursorOffset, 0), project.body.count)
-        project.anchorOffset = offset
-        project.updatedAt = .now
-        try? context.save()
-        refreshDerived()
-        SettingsStore.shared.haptic()
-    }
 
     private func refreshDerived() {
         cachedWords = project.body.count
@@ -55,25 +47,25 @@ struct ManuscriptEditorView: View {
                 .background(Color.orange.opacity(0.15))
             }
 
-            EditorTextEditor(text: $project.body, jumpOffset: $jumpOffset, cursorOffset: $cursorOffset)
+            EditorTextEditor(text: $project.body, jumpOffset: $jumpOffset,
+                            anchorRequest: $anchorRequest,
+                            onAnchor: { offset in
+                                project.anchorOffset = min(max(offset, 0), project.body.count)
+                                project.updatedAt = .now
+                                try? context.save()
+                                refreshDerived()
+                                SettingsStore.shared.haptic()
+                            })
                 .padding(8)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
 
             // 底部状态栏
             HStack(spacing: 14) {
                 Text("\(cachedWords) 字").monospacedDigit()
-                Text("光标 \(cursorOffset)").monospacedDigit().foregroundStyle(.secondary)
                 Button {
-                    setAnchorAtCursor()
+                    anchorRequest = true
                 } label: {
                     Label("在此设锚", systemImage: "anchor")
-                }
-                if project.anchorOffset == nil {
-                    Button {
-                        anchorSheet = true
-                    } label: {
-                        Label("按章节设锚", systemImage: "list.bullet.indent")
-                    }
                 }
                 Spacer()
                 Text("已保存 \(lastSaved.formatted(date: .omitted, time: .shortened))")
@@ -297,13 +289,16 @@ struct DocumentPicker: UIViewControllerRepresentable {
 }
 
 /// 正文编辑器：UIKit UITextView 包装。
-/// 相对 SwiftUI TextEditor 的两点必要能力：
+///
+/// 三个必要能力：
 ///   1. 按字符偏移跳转（目录点章后正文滚到该处）；
-///   2. 输入防抖 —— 每敲一个字都写 SwiftData 会连带触发全书重算，十万字以上明显卡顿。
+///   2. 输入防抖（每敲一个字都写 SwiftData 会连带触发全书重算）；
+///   3. 「在此设锚」——点击时直接读控件里的真实光标位置，不依赖外部状态同步。
 struct EditorTextEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var jumpOffset: Int?
-    @Binding var cursorOffset: Int
+    @Binding var anchorRequest: Bool
+    var onAnchor: (Int) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -321,17 +316,32 @@ struct EditorTextEditor: UIViewRepresentable {
 
     func updateUIView(_ tv: UITextView, context: Context) {
         context.coordinator.parent = self
+
         // 有未提交的输入时不要回写，否则会把用户刚敲的字覆盖成旧值
         if !context.coordinator.hasPending && tv.text != text {
             tv.text = text
         }
-        guard let offset = jumpOffset else { return }
-        let s = tv.text ?? ""
-        let clamped = min(max(offset, 0), s.count)
-        let idx = s.index(s.startIndex, offsetBy: clamped)
-        let utf16Loc = s.utf16.distance(from: s.startIndex, to: idx)
-        tv.scrollRangeToVisible(NSRange(location: utf16Loc, length: 0))
-        DispatchQueue.main.async { self.jumpOffset = nil }
+
+        // 目录跳转
+        if let offset = jumpOffset {
+            let s = tv.text ?? ""
+            let clamped = min(max(offset, 0), s.count)
+            let idx = s.index(s.startIndex, offsetBy: clamped)
+            let utf16Loc = s.utf16.distance(from: s.startIndex, to: idx)
+            tv.scrollRangeToVisible(NSRange(location: utf16Loc, length: 0))
+            DispatchQueue.main.async { self.jumpOffset = nil }
+        }
+
+        // 在此设锚：读控件真实 selection，换算成 Character offset
+        if anchorRequest {
+            let ns = tv.text as NSString
+            let loc = min(max(tv.selectedRange.location, 0), ns.length)
+            let charOffset = ns.substring(to: loc).count
+            DispatchQueue.main.async {
+                self.onAnchor(charOffset)
+                self.anchorRequest = false
+            }
+        }
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
@@ -357,14 +367,6 @@ struct EditorTextEditor: UIViewRepresentable {
             pending?.cancel()
             pending = nil
             parent.text = textView.text ?? ""
-
-        /// 光标位置回传（Character 口径，与 anchorOffset 一致）
-        func textViewDidChangeSelection(_ textView: UITextView) {
-            let utf16Loc = textView.selectedRange.location
-            let prefix = (textView.text as NSString).substring(to: min(utf16Loc, (textView.text as NSString).length))
-            let charOffset = prefix.count
-            if parent.cursorOffset != charOffset { parent.cursorOffset = charOffset }
-        }
         }
     }
 }

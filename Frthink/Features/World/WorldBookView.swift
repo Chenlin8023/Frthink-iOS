@@ -180,7 +180,7 @@ struct CorpusCollectSheet: View {
                         Text("AI 原始回复（可修正后保存）").font(.caption).foregroundStyle(.secondary)
                         TextEditor(text: $rawText).font(.caption).frame(minHeight: 140)
                             .border(Color.secondary.opacity(0.3))
-                        Button("解析并保存") { saveParsed() }.buttonStyle(.bordered)
+                        Button("解析并保存") { saveParsed(rawText) }.buttonStyle(.bordered)
                     }
                     PromptEditorSection(systemText: $sysText, userText: $userText)
                 }
@@ -211,8 +211,8 @@ struct CorpusCollectSheet: View {
         rawText = ""
         notice = "0/\(segs.count)"
 
-        var collected: [String] = []
         task = Task {
+            var total = 0
             for (i, seg) in segs.enumerated() {
                 if Task.isCancelled { break }
                 let compiled = PromptBuilder.compileCorpusExtraction(segment: seg)
@@ -221,34 +221,33 @@ struct CorpusCollectSheet: View {
                 do {
                     let r = try await AiRunner.run(spec: spec, messages: compiled.messages,
                                                    context: context, projectID: project.id)
-                    collected.append(r.text)
+                    rawText = r.text
+                    total += saveParsed(r.text)
                 } catch {
-                    await MainActor.run { errorText = error.localizedDescription }
+                    errorText = error.localizedDescription
                     break
                 }
-                await MainActor.run { notice = "第 \(i + 1)/\(segs.count) 段" }
+                notice = "第 \(i + 1)/\(segs.count) 段 · 累计 \(total) 条"
             }
-            let joined = collected.joined(separator: "\n")
-            await MainActor.run {
-                running = false
-                rawText = joined
-                _ = saveParsed()
-            }
+            running = false
+            notice = "已保存 \(total) 条（\(segs.count) 段）"
         }
     }
 
     /// 从（可被用户修正过的）原始回复按行解析语料并入库
     @discardableResult
-    private func saveParsed() -> Int {
+    @discardableResult
+    private func saveParsed(_ source: String) -> Int {
         var n = 0
-        for line in rawText.split(separator: "\n") {
-            let t = line.trimmingCharacters(in: CharacterSet(charactersIn: "- • ")).trimmingCharacters(in: .whitespaces)
-            if t.isEmpty || t.contains("NO_ADDITIONS") || t == "```" { continue }
-            context.insert(CorpusEntry(project: project, content: t, sourceRange: "正文尾部"))
+        for line in source.split(separator: "\n") {
+            let t = line.trimmingCharacters(in: CharacterSet(charactersIn: "- •*")).trimmingCharacters(in: .whitespaces)
+            if t.isEmpty || t.contains("NO_ADDITIONS") { continue }
+            if t.count > 160 { continue }
+            if t.hasPrefix("以上") || t.hasPrefix("说明") || t.hasPrefix("注：") || t.hasPrefix("```") { continue }
+            context.insert(CorpusEntry(project: project, content: t, sourceRange: "锚前分析"))
             n += 1
         }
-        try? context.save()
-        if n > 0 { notice = "已保存 \(n) 条语料" }
+        if n > 0 { try? context.save() }
         return n
     }
 }
@@ -360,7 +359,7 @@ struct EventExtractSheet: View {
                         Text("AI 原始回复（可修正后保存）").font(.caption).foregroundStyle(.secondary)
                         TextEditor(text: $rawText).font(.caption).frame(minHeight: 140)
                             .border(Color.secondary.opacity(0.3))
-                        Button("解析并保存") { saveParsed() }.buttonStyle(.bordered)
+                        Button("解析并保存") { saveParsed(rawText) }.buttonStyle(.bordered)
                     }
                     PromptEditorSection(systemText: $sysText, userText: $userText)
                 }
@@ -392,41 +391,37 @@ struct EventExtractSheet: View {
         rawText = ""
         notice = "0/\(segs.count)"
 
-        var collected: [String] = []
         task = Task {
+            var total = 0
             for (i, seg) in segs.enumerated() {
                 if Task.isCancelled { break }
-                let compiled = PromptBuilder.compileEventExtraction(existingTitles: project.events.map(\.title), segment: seg)
+                let compiled = PromptBuilder.compileEventExtraction(
+                    existingTitles: project.events.map(\.title), segment: seg)
                 let spec = AiTaskSpec(slot: .worker, temperature: 0.3, maxTokens: nil,
                                       stage: "event", taskLabel: "整理")
                 do {
                     let r = try await AiRunner.run(spec: spec, messages: compiled.messages,
                                                    context: context, projectID: project.id)
-                    collected.append(r.text)
+                    rawText = r.text
+                    total += saveParsed(r.text)
                 } catch {
-                    await MainActor.run { errorText = error.localizedDescription }
+                    errorText = error.localizedDescription
                     break
                 }
-                await MainActor.run { notice = "第 \(i + 1)/\(segs.count) 段" }
+                notice = "第 \(i + 1)/\(segs.count) 段 · 累计 \(total) 个事件"
             }
-            let joined = collected.joined(separator: "\n")
-            await MainActor.run {
-                running = false
-                rawText = joined
-                _ = saveParsed()
-            }
+            running = false
+            notice = "已保存 \(total) 个事件（\(segs.count) 段）"
         }
     }
 
     /// 从（可被用户修正过的）原始回复解析 events JSON 并入库
     @discardableResult
-    private func saveParsed() -> Int {
-        guard let data = PromptBuilder.extractJSONObject(from: rawText),
+    @discardableResult
+    private func saveParsed(_ source: String) -> Int {
+        guard let data = PromptBuilder.extractJSONObject(from: source),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let events = obj["events"] as? [[String: Any]] else {
-            errorText = "解析失败：回复中没有找到 {\"events\": [...]} 结构"
-            return 0
-        }
+              let events = obj["events"] as? [[String: Any]] else { return 0 }
         var n = 0
         for e in events {
             guard let t = e["title"] as? String, !t.isEmpty else { continue }
@@ -438,8 +433,7 @@ struct EventExtractSheet: View {
             context.insert(ev)
             n += 1
         }
-        try? context.save()
-        if n > 0 { notice = "已保存 \(n) 个事件" }
+        if n > 0 { try? context.save() }
         return n
     }
 }

@@ -63,6 +63,22 @@ enum ChapterIndex {
 
         marks.sort { $0.offset < $1.offset }
 
+        // 去重：同一行只算一次；紧邻的两行（标题 + 副标题）只保留第一个；同名的重复章丢弃。
+        // 这是"不交叉识别同一章节"的实现点。
+        var deduped: [(offset: Int, title: String, isVolume: Bool)] = []
+        for mark in marks {
+            if let last = deduped.last {
+                if last.offset == mark.offset { continue }
+                if !last.isVolume && !mark.isVolume {
+                    if last.title == mark.title { continue }
+                    // 后一处紧贴前一处（中间没有空行）→ 视为同一章的副标题，保留第一处
+                    if mark.offset - last.offset <= last.title.count + 2 { continue }
+                }
+            }
+            deduped.append(mark)
+        }
+        marks = deduped
+
         var chapters: [ChapterNode] = []
         var volumes: [VolumeNode] = []
         var currentVolume: String?

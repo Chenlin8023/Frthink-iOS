@@ -12,8 +12,6 @@ struct AnchorSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var customOffset = ""
-    @State private var query = ""
-    @State private var jumpChapter = ""
     @State private var limit: Int = AnalysisScope.defaultChapters
     @State private var tick = 0
 
@@ -21,9 +19,6 @@ struct AnchorSheet: View {
         ChapterIndex.scan(project.body)
     }
 
-    private var filtered: [ChapterNode] {
-        ChapterIndex.filter(scan.chapters, query: query)
-    }
 
     private var anchor: Int { AnalysisScope.anchor(of: project) }
 
@@ -40,8 +35,6 @@ struct AnchorSheet: View {
             Form {
                 statusSection
                 previewSection
-                searchSection
-                chapterSections
                 manualSection
                 quickSection
                 scopeSection
@@ -96,118 +89,6 @@ struct AnchorSheet: View {
                     .lineLimit(6)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-        }
-    }
-
-    // MARK: 搜索与快跳
-
-    private var searchSection: some View {
-        Section {
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").font(.caption).foregroundStyle(.secondary)
-                TextField("搜索章节标题", text: $query)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                    } label: {
-                        Image(systemName: "xmark.circle.fill").font(.caption)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            HStack(spacing: 6) {
-                TextField("跳到第 N 章", text: $jumpChapter)
-                    .keyboardType(.numberPad)
-                    .frame(width: 110)
-                Button("跳到并设锚") { jumpToChapter() }
-                    .font(.caption)
-                    .disabled(Int(jumpChapter) == nil)
-                Spacer()
-            }
-            HStack(spacing: 8) {
-                Button("首章") { setAnchor(scan.chapters.first?.start) }
-                    .font(.caption)
-                Button("末章") { setAnchor(scan.chapters.last?.start) }
-                    .font(.caption)
-                if let c = currentChapter {
-                    Button("锚所在章") { setAnchor(c.start) }
-                        .font(.caption)
-                }
-                Spacer()
-            }
-            .buttonStyle(.bordered)
-        } header: {
-            Text("定位")
-        } footer: {
-            if !query.isEmpty {
-                Text("匹配 \(filtered.count) 章")
-                    .font(.caption2)
-            }
-        }
-    }
-
-    // MARK: 目录
-
-    @ViewBuilder
-    private var chapterSections: some View {
-        if scan.chapters.isEmpty {
-            Section("目录") {
-                Text("没有识别到章节标题（支持「第X章 / 序章 / 楔子 / 尾声 / 番外 / Chapter N」）。可以手动填偏移，或选「锚到正文末尾」。")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        } else if !query.isEmpty || scan.volumes.isEmpty {
-            Section("章节（\(filtered.count)）") {
-                ForEach(filtered) { node in
-                    chapterRow(node)
-                }
-            }
-        } else {
-            ForEach(scan.volumes) { v in
-                Section(volumeHeader(v)) {
-                    ForEach(nodes(in: v)) { node in
-                        chapterRow(node)
-                    }
-                }
-            }
-        }
-    }
-
-    private func volumeHeader(_ v: VolumeNode) -> String {
-        let count = nodes(in: v).count
-        return "\(v.title)（\(count) 章）"
-    }
-
-    private func nodes(in volume: VolumeNode) -> [ChapterNode] {
-        scan.chapters.filter { $0.start >= volume.start && $0.start < volume.end }
-    }
-
-    private func chapterRow(_ node: ChapterNode) -> some View {
-        Button {
-            setAnchor(node.start)
-        } label: {
-            HStack(spacing: 8) {
-                Text("\(node.index)")
-                    .font(.caption2).monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(width: 30, alignment: .trailing)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(node.title).font(.footnote).lineLimit(1)
-                    Text("第 \(node.start) 字 · 约 \(node.chars) 字")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if node.start == anchor {
-                    Image(systemName: "anchor.fill").font(.caption2).foregroundStyle(.tint)
-                }
-            }
-        }
-        .tint(.primary)
-        .contextMenu {
-            Button("设锚到本章开头") { setAnchor(node.start) }
-            Button("设锚到本章结尾") { setAnchor(node.end) }
-            Button("复制标题") { UIPasteboard.general.string = node.title }
         }
     }
 
@@ -272,11 +153,4 @@ struct AnchorSheet: View {
         tick += 1
     }
 
-    private func jumpToChapter() {
-        guard let n = Int(jumpChapter) else { return }
-        guard let node = scan.chapters.first(where: { $0.index == n }) else { return }
-        query = ""
-        jumpChapter = ""
-        setAnchor(node.start)
-    }
 }
