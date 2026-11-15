@@ -2,16 +2,19 @@ import Foundation
 
 /// 小说内部目录结构（卷 → 章）。
 ///
-/// 存在理由：v1.9 只有一条章节正则，且 `[章节回卷部篇]` 把「第一卷」也当成章，
-/// 于是锚前章数虚高、锚 sheet 里几百条平铺、无法按卷定位。
-/// 这里把「卷」和「章」分成两套模式，产出可直接跳转的树。
+/// 识别策略参考主流阅读器（legado/「阅读」的 chapterRule、Calibre 的 chapter detection、
+/// 静读天下 / Apple Books 对 txt 的处理）：
+///   1. 逐行扫描，而不是全文一条正则——这样才能用到"是否缩进、前后是否空行"这类版面特征；
+///   2. 前缀规则覆盖卷/部/篇/集、章/节/回/话/幕、序章楔子尾声番外、Chapter/Part/Prologue；
+///   3. 编号规则覆盖 `1.` `1、` `01:` `（一）` `一、` 与纯数字行，但要求顶格 + 行短；
+///   4. 一律排除"太长、像句子（≥2 个句读）、以句末标点结尾"的行——这是把正文误判成章节的主因。
 struct ChapterNode: Identifiable {
     var index: Int            // 全书章节序号（1-based，只数章）
     var title: String
     var start: Int
     var end: Int
-    var volume: String?       // 所属卷标题（nil = 卷外）
-    var offsetInVolume: Int   // 卷内序号（1-based）
+    var volume: String?
+    var offsetInVolume: Int
 
     var id: Int { index }
     var chars: Int { max(0, end - start) }
@@ -28,61 +31,50 @@ struct VolumeNode: Identifiable {
 
 enum ChapterIndex {
 
-    /// 只认章（含序章/楔子/尾声/后记/番外），不认卷
-    static let chapterPattern = "^\\s*(第[0-9０-９零一二三四五六七八九十百千万两]{1,8}[章节回]|序章|楔子|引子|尾声|后记|番外[篇]?|Chapter\\s*[0-9０-９]+|CHAPTER\\s+[0-9]+).*$"
+    private enum Kind { case chapter, volume }
 
-    /// 只认卷/部/篇
-    static let volumePattern = "^\\s*(第[0-9０-９零一二三四五六七八九十百千万两]{1,8}[卷部篇]|[上中下]卷|Volume\\s*[0-9]+|Part\\s*[0-9]+).*$"
+    /// 最大标题长度（中文标题普遍很短；放宽到 44 是为了兼容"第X章 一长串标题"）
+    private static let maxTitleChars = 44
 
-    private static func regex(_ pattern: String) -> NSRegularExpression {
-        (try? NSRegularExpression(pattern: pattern,
-                                  options: [.anchorsMatchLines, .caseInsensitive]))
-            ?? (try! NSRegularExpression(pattern: "^$", options: [.anchorsMatchLines]))
-    }
+    // MARK: - 扫描
 
-    /// 像不像一个标题行：太长的、句子式（标点多）的、空白的都不算。
-    /// 这一层过滤是"划分不准"的主要修法——正则只能认出前缀，长度与标点才分得清正文。
-    static func isPlausibleTitle(_ raw: String, limit: Int) -> Bool {
-        let t = raw.trimmingCharacters(in: .whitespaces)
-        if t.isEmpty { return false }
-        if t.count > limit { return false }
-        let sentenceMarks = t.filter { "，。；！？,!?;".contains($0) }.count
-        if sentenceMarks >= 2 { return false }
-        // 纯数字/纯符号不算标题
-        let meaningful = t.filter { $0.isLetter || $0.isNumber || $0 == "章" || $0 == "节" }
-        if meaningful.count < 2 { return false }
-        return true
-    }
-
-    /// 全文扫描：一次拿到章 + 卷，按出现顺序建树
     static func scan(_ text: String) -> (chapters: [ChapterNode], volumes: [VolumeNode]) {
-        let ns = text as NSString
-        let full = NSRange(location: 0, length: ns.length)
+        // 切行并记录每行的起始 offset（Character 口径）
+        var lineStarts: [Int] = []
+        var lines: [String] = []
+        var offset = 0
+        for raw in text.components(separatedBy: "\n") {
+            lineStarts.append(offset)
+            lines.append(raw)
+            offset += raw.count + 1
+        }
 
         var marks: [(offset: Int, title: String, isVolume: Bool)] = []
-        for m in regex(chapterPattern).matches(in: text, range: full) {
-            let t = ns.substring(with: m.range).trimmingCharacters(in: .whitespaces)
-            if isPlausibleTitle(t, limit: 44) { marks.append((m.range.location, t, false)) }
+        for (i, raw) in lines.enumerated() {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.isEmpty || line.count > maxTitleChars { continue }
+
+            let prevBlank = (i == 0) || lines[i - 1].trimmingCharacters(in: .whitespaces).isEmpty
+            let nextBlank = (i == lines.count - 1) || lines[i + 1].trimmingCharacters(in: .whitespaces).isEmpty
+
+            guard let kind = classify(line, raw: raw, prevBlank: prevBlank, nextBlank: nextBlank) else { continue }
+            marks.append((lineStarts[i], line, kind == .volume))
         }
-        for m in regex(volumePattern).matches(in: text, range: full) {
-            let t = ns.substring(with: m.range).trimmingCharacters(in: .whitespaces)
-            if isPlausibleTitle(t, limit: 30) { marks.append((m.range.location, t, true)) }
-        }
+
         marks.sort { $0.offset < $1.offset }
 
         var chapters: [ChapterNode] = []
         var volumes: [VolumeNode] = []
         var currentVolume: String?
-        var volumeStart: Int = 0
+        var volumeStart = 0
         var chapterCounter = 0
         var inVolumeCounter = 0
 
         for (i, mark) in marks.enumerated() {
-            let nextOffset = (i + 1 < marks.count) ? marks[i + 1].offset : ns.length
+            let nextOffset = (i + 1 < marks.count) ? marks[i + 1].offset : text.count
             if mark.isVolume {
-                // 收尾上一个卷
-                if currentVolume != nil {
-                    volumes.append(VolumeNode(title: currentVolume!, start: volumeStart,
+                if let v = currentVolume {
+                    volumes.append(VolumeNode(title: v, start: volumeStart,
                                               end: mark.offset,
                                               chapterRange: chapterRange(of: chapters)))
                 }
@@ -98,20 +90,21 @@ enum ChapterIndex {
                                             offsetInVolume: inVolumeCounter))
             }
         }
-        if currentVolume != nil {
-            volumes.append(VolumeNode(title: currentVolume!, start: volumeStart,
-                                      end: ns.length,
+        if let v = currentVolume {
+            volumes.append(VolumeNode(title: v, start: volumeStart,
+                                      end: text.count,
                                       chapterRange: chapterRange(of: chapters)))
         }
-        // 修正每章 end：下一章的开头（跨卷时也成立，因为 marks 已按 offset 排序）
+
         if chapters.count > 1 {
             for i in 0..<(chapters.count - 1) {
                 chapters[i].end = min(chapters[i].end, chapters[i + 1].start)
             }
         }
         if let last = chapters.last {
-            chapters[chapters.count - 1].end = max(last.start, ns.length)
+            chapters[chapters.count - 1].end = max(last.start, text.count)
         }
+
         return (chapters, volumes)
     }
 
@@ -120,22 +113,61 @@ enum ChapterIndex {
         return first.index...last.index
     }
 
-    static func chapters(in text: String) -> [ChapterNode] {
-        scan(text).chapters
+    // MARK: - 判定
+
+    private static func classify(_ line: String, raw: String,
+                                 prevBlank: Bool, nextBlank: Bool) -> Kind? {
+        // 公共排除：句子味太重
+        if let last = line.last, "。！？…”」』!?".contains(last) { return nil }
+        let sentenceMarks = line.filter { "，。；！？,!?;".contains($0) }.count
+        if sentenceMarks >= 2 { return nil }
+
+        let indented = raw.hasPrefix(" ") || raw.hasPrefix("\t") || raw.hasPrefix("\u{3000}")
+
+        // 1. 卷 / 部 / 篇 / 集
+        if matches(line, #"^第[0-9０-９零一二三四五六七八九十百千万两]{1,8}[卷部篇集]"#) { return .volume }
+        if matches(line, #"^[上中下]卷"#) { return .volume }
+        if matches(line, #"(?i)^(volume|part)\s*[0-9ivxlc]+"#), line.count <= 30 { return .volume }
+        if matches(line, #"^(正文|正文卷|卷一|卷二|卷三)\s*$"#) { return .volume }
+
+        // 2. 章 / 节 / 回 / 话 / 幕
+        if matches(line, #"^第[0-9０-９零一二三四五六七八九十百千万两]{1,8}[章节回话話幕]"#) { return .chapter }
+        if matches(line, #"(?i)^(prologue|epilogue|interlude|afterword|side\s*story|chapter\s*zero)"#) { return .chapter }
+        if matches(line, #"(?i)^(chapter|ch\.?)\s*[0-9０-９ivxlc]+"#) { return .chapter }
+        if matches(line, #"^(序章|序言|楔子|引子|引言|前言|后记|尾声|终章|结局|大结局|番外[篇]?|外传|附录)"#) { return .chapter }
+        // 单独一个「序」：要求很短，避免误伤正文
+        if line == "序" || (line.hasPrefix("序") && line.count <= 6 && !line.contains("序章")) { return .chapter }
+        // 包裹式：【第X章】 / [第X章] / （第X章）
+        if matches(line, #"^[【\[（(]\s*第[0-9０-９零一二三四五六七八九十百千万两]{1,8}[章节回]"#) { return .chapter }
+        if matches(line, #"^第[0-9０-９零一二三四五六七八九十百千万两]{1,8}[章节回]\s*[】\])）]"#) { return .chapter }
+
+        // 3. 编号式：必须顶格（正文通常首行缩进），且行要短
+        guard !indented else { return nil }
+        if matches(line, #"^[0-9０-９]{1,4}\s*[、.．:：]\s*\S"#), line.count <= 30 { return .chapter }
+        if matches(line, #"^[（(]\s*[0-9０-９一二三四五六七八九十]{1,4}\s*[）)]\s*\S"#), line.count <= 30 { return .chapter }
+        if matches(line, #"^[一二三四五六七八九十]{1,4}\s*[、.．]\s*\S"#),
+           line.count <= 30, prevBlank || nextBlank { return .chapter }
+        // 纯数字独立成行（001 / 12）：必须前后有空行
+        if matches(line, #"^[0-9０-９]{1,4}$"#), prevBlank || nextBlank { return .chapter }
+
+        return nil
     }
 
-    static func volumes(in text: String) -> [VolumeNode] {
-        scan(text).volumes
+    private static func matches(_ s: String, _ pattern: String) -> Bool {
+        s.range(of: pattern, options: [.regularExpression]) != nil
     }
 
-    /// 按标题/关键词过滤（空词 = 全部）
+    // MARK: - 查询
+
+    static func chapters(in text: String) -> [ChapterNode] { scan(text).chapters }
+    static func volumes(in text: String) -> [VolumeNode] { scan(text).volumes }
+
     static func filter(_ chapters: [ChapterNode], query: String) -> [ChapterNode] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return chapters }
         return chapters.filter { $0.title.localizedCaseInsensitiveContains(q) }
     }
 
-    /// 锚所在章（最后一个 start <= anchor 的章；锚在最前面时为 nil）
     static func chapter(at anchor: Int, in chapters: [ChapterNode]) -> ChapterNode? {
         chapters.last { $0.start <= anchor }
     }
