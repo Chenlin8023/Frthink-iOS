@@ -101,9 +101,12 @@ struct SettingsView: View {
         Section("模型（分任务配置，空＝用凭证默认）") {
             let cred = settings.activeCredential
             modelField("写作模型", binding: $settings.writingModel, fallback: cred?.model ?? "")
+            modelField("杂务模型", binding: $settings.workerModel, fallback: cred?.model ?? "")
             modelField("摘要模型", binding: $settings.summaryModel, fallback: cred?.model ?? "")
             modelField("翻译模型", binding: $settings.translationModel, fallback: cred?.model ?? "")
             modelField("整理模型", binding: $settings.extractModel, fallback: cred?.model ?? "")
+            Text("杂务模型用于审校、状态档、自动打标；留空则回落整理模型。这类任务输出都是短 JSON，配便宜模型即可。")
+                .font(.caption2).foregroundStyle(.secondary)
             Stepper("生成温度 \(String(format: "%.1f", settings.temperature))",
                     value: $settings.temperature, in: 0...2, step: 0.1)
             Stepper("输出上限 \(settings.maxOutputTokens) tokens",
@@ -127,6 +130,10 @@ struct SettingsView: View {
         Section("预算") {
             Stepper("注入正文尾部 \(settings.contextBudget) 字", value: $settings.contextBudget, in: 500...30000, step: 500)
             Stepper("整理单段 \(settings.segmentBudget) 字", value: $settings.segmentBudget, in: 500...10000, step: 500)
+            Stepper(String(format: "批量每章估价上限 ¥%.2f", settings.perChapterBudget),
+                    value: $settings.perChapterBudget, in: 0.05...2.0, step: 0.05)
+            Text("批量生成/重制时，累计花费＋本章估价超过预算就停（母版 est=0.2 同量级）。")
+                .font(.caption2).foregroundStyle(.secondary)
         }
     }
 

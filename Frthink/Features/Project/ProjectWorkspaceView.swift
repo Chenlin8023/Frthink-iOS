@@ -33,6 +33,9 @@ struct ProjectWorkspaceView: View {
     @State private var showRules = false
     @State private var showSnapshots = false
     @State private var showHelp = false
+    // 制作台（P0：骨架五段 + 基座自检）与内容档案
+    @State private var showStudio = false
+    @State private var showContentPlan = false
 
     var body: some View {
         TabView(selection: $section) {
@@ -69,6 +72,9 @@ struct ProjectWorkspaceView: View {
             ToolbarItemGroup(placement: .topBarTrailing) {
                 if section == .manuscript {
                     Button("续写") { showPromptPreview = true }
+                    Button { showStudio = true } label: {
+                        Label("制作台", systemImage: "slider.horizontal.3")
+                    }
                 }
                 if section == .cards {
                     Button { showOrganize = true } label: {
@@ -90,6 +96,9 @@ struct ProjectWorkspaceView: View {
                     Button("提取事件") { showExtractEvents = true }
                 }
                 Menu {
+                    Button("制作台（结构/大纲/状态/重制）", systemImage: "slider.horizontal.3") { showStudio = true }
+                    Button("基调与尺度", systemImage: "text.book.closed") { showContentPlan = true }
+                    Divider()
                     Button("翻译（逐段导出）", systemImage: "character.book.closed") { showTranslation = true }
                     Button("长期规则（文风归纳）", systemImage: "text.badge.checkmark") { showRules = true }
                     Button("快照（正文版本备份）", systemImage: "clock.arrow.circlepath") { showSnapshots = true }
@@ -118,6 +127,8 @@ struct ProjectWorkspaceView: View {
         .sheet(isPresented: $showCorpus) { CorpusListView(project: project) }
         .sheet(isPresented: $showExtractEvents) { EventExtractSheet(project: project) }
         // ··· 二级页（全屏，右上角「完成」关闭）
+        .fullScreenCover(isPresented: $showStudio) { ModalPage { StudioView(project: project) } }
+        .fullScreenCover(isPresented: $showContentPlan) { ModalPage { ContentPlanEditor(project: project) } }
         .fullScreenCover(isPresented: $showTranslation) { ModalPage { TranslationView(project: project) } }
         .fullScreenCover(isPresented: $showRules) { ModalPage { RulesView(project: project) } }
         .fullScreenCover(isPresented: $showSnapshots) { ModalPage { SnapshotsView(project: project) } }

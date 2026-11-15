@@ -19,6 +19,21 @@ final class BookProject {
     var bookmarkOffset: Int?        // 书签
     var genre: String               // 本书类型
 
+    // MARK: 内容档案（P0 加法字段，全部可选 = SwiftData 轻量迁移；读写统一走 ContentPlan）
+    var tone: String?               // 整书基调（优先级高于写手规则模板）
+    var contentLevel: String?       // off|suggest|medium|explicit|extreme（ContentPlan.Level）
+    var cadenceStart: Int?          // 前 N 章只铺垫
+    var cadenceEvery: Int?          // 第 N 章起每 M 章一场
+    var groupScenes: Int?           // 全书群体场面配额 0-8
+    var relDimsJSON: String?        // [{n,d,initial}] 关系维度
+    var writerRulesOverride: String? // 整本替换 18 条写手规则模板（空=用内置）
+    var targetChapterChars: Int?    // 单章目标字数
+    var perspective: String?        // 视角人物名（写手规则第 1 条）
+    var remakeInstruction: String?  // 全书重制/生成总指令
+    var chapterRegexOverride: String? // 自定义章节识别正则（P1 用）
+    var personaPatch: String?       // 人设补丁（按基调改写，注入时追加，不覆盖人物卡）
+    var personaChanges: String?     // 补丁改动清单（换行分隔）
+
     @Relationship(deleteRule: .cascade, inverse: \ChatMessage.project)
     var messages: [ChatMessage]
 
@@ -240,6 +255,12 @@ final class UsageRecord {
     var outputTokens: Int
     var cachedTokens: Int
     var createdAt: Date
+
+    // MARK: P0 加法字段（分任务/分章聚合与费用估算；老记录为 nil 不影响统计）
+    var stage: String?              // outline|state|check|remake|generate|review|selfcheck|chat...
+    var chapterIndex: Int?
+    var costCNY: Double?
+    var projectID: UUID?            // 归属书（可空：全局任务如设置页测试连接）
 
     init(credentialName: String, model: String, task: String,
          inputTokens: Int, outputTokens: Int, cachedTokens: Int) {
