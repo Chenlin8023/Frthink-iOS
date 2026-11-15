@@ -18,7 +18,6 @@ struct SetupWizardView: View {
     var onOrganize: () -> Void = {}
     var onCorpus: () -> Void = {}
     var onRules: () -> Void = {}
-    var onContentPlan: () -> Void = {}
     var onContinue: () -> Void = {}
 
     @State private var showAnchor = false
@@ -99,7 +98,7 @@ struct SetupWizardView: View {
             }
 
             stepCard(n: 4, title: "压缩前文",
-                     detail: "人物卡 \(cardCount) 张 · 长期规则 \(ruleCount) 条（锚前分析范围：\(AnalysisScope.limitLabel(AnalysisScope.chapterLimit(for: project)))）",
+                     detail: "角色 \(cardCount) 张 · 文风规则 \(ruleCount) 条 · 参考材料在功能区可勾选（作用范围：\(AnalysisScope.limitLabel(AnalysisScope.chapterLimit(for: project)))）",
                      done: hasDigest, available: true) { onOrganize() }
 
             stepCard(n: 5, title: "写本章要点",
@@ -171,12 +170,7 @@ struct SetupWizardView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(!hasBody)
 
-                Button {
-                    onContentPlan()
-                } label: {
-                    Label("文风与尺度", systemImage: "text.book.closed")
-                }
-                .buttonStyle(.bordered)
+
             }
             Divider()
             HStack(spacing: 10) {

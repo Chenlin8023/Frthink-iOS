@@ -12,6 +12,7 @@ struct ManuscriptEditorView: View {
     @Binding var findReplace: Bool
     @Binding var anchorSheet: Bool
     @Binding var promptPreview: Bool
+    @Binding var jumpOffset: Int?
     @Environment(\.modelContext) private var context
 
     @State private var lastSaved = Date.now
@@ -36,7 +37,7 @@ struct ManuscriptEditorView: View {
                 .background(Color.orange.opacity(0.15))
             }
 
-            EditorTextEditor(text: $project.body)
+            EditorTextEditor(text: $project.body, jumpOffset: $jumpOffset)
                 .padding(8)
                 .ignoresSafeArea(.keyboard, edges: .bottom)
 
@@ -270,14 +271,42 @@ struct DocumentPicker: UIViewControllerRepresentable {
 }
 
 /// 编辑器文本视图（轻量封装，便于后续替换为富文本/CodeMirror 方案）
-struct EditorTextEditor: View {
+/// 正文编辑器：UIKit UITextView 包装。
+/// 与纯 SwiftUI TextEditor 的区别只有一个 —— 支持按字符偏移跳转（目录点章后正文滚到该处）。
+struct EditorTextEditor: UIViewRepresentable {
     @Binding var text: String
+    @Binding var jumpOffset: Int?
 
-    var body: some View {
-        TextEditor(text: $text)
-            .font(.system(size: 16, design: .serif))
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
-            .autocorrectionDisabled(false)
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.font = UIFont.systemFont(ofSize: 16)
+        tv.backgroundColor = .clear
+        tv.textContainerInset = UIEdgeInsets(top: 10, left: 4, bottom: 10, right: 4)
+        tv.autocorrectionType = .default
+        tv.keyboardDismissMode = .interactive
+        tv.delegate = context.coordinator
+        tv.text = text
+        return tv
+    }
+
+    func updateUIView(_ tv: UITextView, context: Context) {
+        context.coordinator.parent = self
+        if tv.text != text { tv.text = text }
+        guard let offset = jumpOffset else { return }
+        let ns = tv.text as NSString
+        let loc = min(max(offset, 0), ns.length)
+        let range = NSRange(location: loc, length: 0)
+        tv.scrollRangeToVisible(range)
+        DispatchQueue.main.async { self.jumpOffset = nil }
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: EditorTextEditor
+        init(_ parent: EditorTextEditor) { self.parent = parent }
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+        }
     }
 }

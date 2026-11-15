@@ -8,6 +8,7 @@ import SwiftData
 struct ChapterDirectorySheet: View {
     @Bindable var project: BookProject
     @Binding var anchorSheet: Bool
+    var onJump: ((Int) -> Void)? = nil
 
     @Environment(\.modelContext) private var context
     @Environment(\.dismiss) private var dismiss
@@ -104,6 +105,7 @@ struct ChapterDirectorySheet: View {
     private func row(_ node: ChapterNode) -> some View {
         Button {
             setAnchor(node.start)
+            onJump?(node.start)
             dismiss()
         } label: {
             HStack(spacing: 8) {

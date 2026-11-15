@@ -26,15 +26,15 @@ struct ProjectWorkspaceView: View {
     @State private var showSnapshots = false
     @State private var showHelp = false
     @State private var showStudio = false
-    @State private var showContentPlan = false
     @State private var showPromptStudio = false
     @State private var showDirectory = false
+    @State private var pendingJump: Int?
 
     var body: some View {
         TabView(selection: $section) {
             ManuscriptEditorView(project: project, importer: $showImporter,
                                  findReplace: $showFindReplace, anchorSheet: $showAnchor,
-                                 promptPreview: $showPromptPreview)
+                                 promptPreview: $showPromptPreview, jumpOffset: $pendingJump)
                 .tabItem { Label("书稿", systemImage: "doc.text") }
                 .tag(Tab.manuscript)
             ChatView(project: project)
@@ -66,7 +66,6 @@ struct ProjectWorkspaceView: View {
                 }
                 Menu {
                     Button("提示词编排", systemImage: "list.number") { showPromptStudio = true }
-                    Button("基调与尺度", systemImage: "text.book.closed") { showContentPlan = true }
                     Divider()
                     Button("翻译（逐段导出）", systemImage: "character.book.closed") { showTranslation = true }
                     Button("快照（正文版本备份）", systemImage: "clock.arrow.circlepath") { showSnapshots = true }
@@ -84,7 +83,7 @@ struct ProjectWorkspaceView: View {
         .sheet(isPresented: $showImporter) { importSheet }
         .sheet(isPresented: $showFindReplace) { findReplaceSheet }
         .sheet(isPresented: $showAnchor) { AnchorSheet(project: project) }
-        .sheet(isPresented: $showDirectory) { ChapterDirectorySheet(project: project, anchorSheet: $showAnchor) }
+        .sheet(isPresented: $showDirectory) { ChapterDirectorySheet(project: project, anchorSheet: $showAnchor, onJump: { pendingJump = $0 }) }
         .fullScreenCover(isPresented: $showPromptPreview) {
             ModalPage { ContinuationSheet(project: project) }
         }
@@ -96,11 +95,9 @@ struct ProjectWorkspaceView: View {
                                 onOrganize: { openFromWizard { section = .archive; archiveRequest = .character } },
                                 onCorpus: { openFromWizard { section = .archive; archiveRequest = .setting } },
                                 onRules: { openFromWizard { section = .archive; archiveRequest = .style } },
-                                onContentPlan: { openFromWizard { showContentPlan = true } },
                                 onContinue: { openFromWizard { showPromptPreview = true } })
             }
         }
-        .fullScreenCover(isPresented: $showContentPlan) { ModalPage { ContentPlanEditor(project: project) } }
         .fullScreenCover(isPresented: $showPromptStudio) { ModalPage { PromptStudioView(project: project) } }
         .fullScreenCover(isPresented: $showTranslation) { ModalPage { TranslationView(project: project) } }
         .fullScreenCover(isPresented: $showSnapshots) { ModalPage { SnapshotsView(project: project) } }

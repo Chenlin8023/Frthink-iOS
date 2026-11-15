@@ -55,13 +55,9 @@ enum PromptAssembler {
         var v = Vars()
         let plan = ContentPlan.load(from: project)
 
-        // 基调（含尺度档，让模型知道这场戏写到什么程度）
-        var toneParts: [String] = []
-        if !plan.tone.isEmpty { toneParts.append(plan.tone) }
-        if plan.level != .off {
-            toneParts.append("尺度档：\(plan.level.title)（\(plan.level.detail)）")
-        }
-        v.tone = toneParts.joined(separator: "\n")
+        // 基调/尺度已改为「参考材料」设定词条（功能区可勾选，默认关闭），这里不再单独拼，
+        // 否则同一段文字会被注入两次。
+        v.tone = ""
 
         // 锚前尾部（学习用）
         let anchor = AnalysisScope.anchor(of: project)

@@ -149,6 +149,7 @@ struct ArchiveView: View {
                 switch pane {
                 case .setting:
                     Button("收集事实到语料") { showCorpusCollect = true }
+                    Button("添加内置参考材料（基调 / 世界观）") { addBuiltinReferences() }
                     Button("查看语料库") { showCorpusList = true }
                     Button("新增设定词条") { showNewEntry = true }
                 case .character:
@@ -202,6 +203,13 @@ struct ArchiveView: View {
                                    try? context.save()
                                },
                                onEdit: { editingEntry = e })
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        editingEntry = nil
+                        context.delete(e)
+                        try? context.save()
+                    } label: { Label("删除", systemImage: "trash") }
+                }
             }
         } header: {
             Text("设定词条（\(ws.count)）")
@@ -215,6 +223,12 @@ struct ArchiveView: View {
                                enabled: nil,
                                onToggle: nil,
                                onEdit: nil)
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        context.delete(t)
+                        try? context.save()
+                    } label: { Label("删除", systemImage: "trash") }
+                }
             }
         } header: {
             Text("语料事实（\(cs.count)）")
@@ -237,6 +251,13 @@ struct ArchiveView: View {
                                    try? context.save()
                                },
                                onEdit: { editingCard = c })
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        editingCard = nil
+                        context.delete(c)
+                        try? context.save()
+                    } label: { Label("删除", systemImage: "trash") }
+                }
             }
         } header: {
             Text("角色卡（\(list.count)）")
@@ -267,6 +288,13 @@ struct ArchiveView: View {
                                enabled: nil,
                                onToggle: nil,
                                onEdit: { editingEvent = ev })
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        editingEvent = nil
+                        context.delete(ev)
+                        try? context.save()
+                    } label: { Label("删除", systemImage: "trash") }
+                }
             }
         } header: {
             Text("剧情节点（\(list.count)）")
@@ -286,10 +314,43 @@ struct ArchiveView: View {
                                enabled: nil,
                                onToggle: nil,
                                onEdit: { editingRule = r })
+                .swipeActions(edge: .trailing) {
+                    Button(role: .destructive) {
+                        editingRule = nil
+                        context.delete(r)
+                        try? context.save()
+                    } label: { Label("删除", systemImage: "trash") }
+                }
             }
         } header: {
             Text("文风规则（\(list.count)）")
         }
+    }
+}
+
+extension ArchiveView {
+    /// 把内置的基调 / 世界观预设写成「默认关闭」的设定词条，由用户自行勾选。
+    /// 这样"基调与尺度"不再是一个独立机制，而是可选资料。
+    func addBuiltinReferences() {
+        let existing = Set(entries.map { $0.title })
+        var added = 0
+        for p in ContentKit.tonePresets {
+            let title = "参考·基调·\(p.name)"
+            if existing.contains(title) { continue }
+            let e = WorldEntry(project: project, title: title, keywords: "", content: p.tone)
+            e.enabled = false
+            context.insert(e)
+            added += 1
+        }
+        for w in ContentKit.worldPresets {
+            let title = "参考·世界观·\(w.name)"
+            if existing.contains(title) { continue }
+            let e = WorldEntry(project: project, title: title, keywords: "", content: w.text)
+            e.enabled = false
+            context.insert(e)
+            added += 1
+        }
+        try? context.save()
     }
 }
 
