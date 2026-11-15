@@ -15,6 +15,9 @@ struct ChatView: View {
     @State private var showPromptPreview = false
     @State private var pendingInstruction = ""
     @State private var editingMessage: ChatMessage?
+    @State private var showPromptStudio = false
+    @State private var showAnchorSheet = false
+    @State private var showLibrary = false
 
     private var messages: [ChatMessage] {
         project.messages.sorted { $0.createdAt < $1.createdAt }
@@ -22,6 +25,8 @@ struct ChatView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            rpHeader
+            injectionBar
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
@@ -50,6 +55,7 @@ struct ChatView: View {
             }
             HStack(alignment: .bottom, spacing: 8) {
                 Button {
+            quickActions
                     pendingInstruction = "从续写锚之后继续写下去。"
                     showPromptPreview = true
                 } label: {
@@ -80,6 +86,9 @@ struct ChatView: View {
             .padding()
             .background(.bar)
         }
+                .fullScreenCover(isPresented: $showPromptStudio) { ModalPage { PromptStudioView(project: project) } }
+        .fullScreenCover(isPresented: $showAnchorSheet) { ModalPage { AnchorSheet(project: project) } }
+        .fullScreenCover(isPresented: $showLibrary) { ModalPage { LibraryView(project: project) } }
         .sheet(item: $editingMessage) { msg in
             BubbleEditSheet(message: msg)
         }
@@ -92,6 +101,91 @@ struct ChatView: View {
             }
         }
     }
+    // MARK: RP 头部（酒馆式：目录/资料/预设 三入口常驻在顶栏）
+
+    private var rpHeader: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(project.title).font(.subheadline).bold().lineLimit(1)
+                Text(anchorLine).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer()
+            headerButton("text.badge.checkmark", "预设") { showPromptStudio = true }
+            headerButton("books.vertical", "资料") { showLibrary = true }
+            headerButton("anchor", "锚") { showAnchorSheet = true }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
+    private var anchorLine: String {
+        let a = AnalysisScope.anchor(of: project)
+        if AnalysisScope.anchorIsExplicit(project) {
+            return "锚 第 \(a) 字 · 锚前 \(AnalysisScope.chapterCount(beforeAnchorOf: project)) 章"
+        }
+        return "锚 = 正文末尾 · \(project.body.count) 字"
+    }
+
+    private func headerButton(_ icon: String, _ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            VStack(spacing: 2) {
+                Image(systemName: icon).font(.system(size: 15))
+                Text(title).font(.system(size: 9))
+            }
+            .frame(width: 42)
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+    }
+
+    // MARK: 注入条（一眼看到本轮会注入多少）
+
+    private var injectionBar: some View {
+        let cards = project.characterCards.filter(\.enabled).count
+        let corpus = ProjectData.corpusEntries(project, context: context).count
+        return HStack(spacing: 12) {
+            Label("\(cards) 人物", systemImage: "person.2")
+            Label("\(corpus) 设定", systemImage: "books.vertical")
+            Label("尾部 \(SettingsStore.shared.contextBudget)", systemImage: "text.alignleft")
+            Spacer()
+            Button("看提示词") { showPromptStudio = true }
+        }
+        .font(.caption2)
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color(.tertiarySystemBackground))
+    }
+
+    // MARK: 快捷操作
+
+    private var quickActions: some View {
+        HStack(spacing: 16) {
+            Button { send(override: "继续往下写，接上文。") } label: {
+                Label("继续", systemImage: "arrow.forward.to.line")
+            }
+            Button {
+                if let last = messages.last(where: { $0.role == "assistant" }) { rewrite(last) }
+            } label: {
+                Label("重写上一条", systemImage: "arrow.clockwise")
+            }
+            if streaming {
+                Button { streamTask?.cancel() } label: {
+                    Label("停止", systemImage: "stop.circle")
+                }
+            }
+            Spacer()
+            Button { showPromptPreview = true } label: {
+                Label("高级", systemImage: "slider.horizontal.3")
+            }
+        }
+        .font(.caption2)
+        .padding(.horizontal, 16)
+        .padding(.top, 6)
+    }
+
 
     /// RP 式重写：删掉这条回复，按它前面的用户指令重新生成
     private func rewrite(_ msg: ChatMessage) {
@@ -232,17 +326,27 @@ struct BubbleView: View {
     // MARK: 气泡本体
 
     private var bubble: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text(message.content)
-                .textSelection(.enabled)
-                .lineSpacing(4)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            actionRow
+        HStack(alignment: .top, spacing: 10) {
+            if !isUser {
+                Capsule()
+                    .fill(Color.accentColor.opacity(0.35))
+                    .frame(width: 2)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(isUser ? "你" : "AI")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(message.content)
+                    .textSelection(.enabled)
+                    .lineSpacing(5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                actionRow
+            }
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(isUser ? Color.accentColor.opacity(0.15) : Color(.secondarySystemBackground))
-        .cornerRadius(14)
+        .padding(.vertical, 8)
+        .padding(.horizontal, isUser ? 12 : 0)
+        .background(isUser ? Color.accentColor.opacity(0.12) : Color.clear)
+        .cornerRadius(12)
     }
 
     // MARK: 思考块
