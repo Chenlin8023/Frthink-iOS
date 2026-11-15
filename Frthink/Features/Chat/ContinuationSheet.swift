@@ -268,15 +268,33 @@ struct ContinuationSheet: View {
         let bookRules = useRules
             ? ((try? context.fetch(FetchDescriptor<WritingRule>()))?.filter { $0.project == project } ?? [])
             : []
-        let compiled = PromptBuilder.compileContinuation(
-            project: project,
-            instruction: roundInstruction.isEmpty ? instruction : roundInstruction,
-            globalRules: useRules ? ProjectData.globalRules(context: context) : [],
-            bookRules: bookRules,
-            worldEntries: useWorld ? ProjectData.worldEntries(project, context: context) : [],
-            corpusEntries: useCorpus ? ProjectData.corpusEntries(project, context: context) : [],
-            cards: useCards ? project.characterCards : [],
-            contextBudget: settings.contextBudget)
+        let round = roundInstruction.isEmpty ? instruction : roundInstruction
+        let compiled: PromptBuilder.Compiled
+        if PromptBlockStore.hasCustom(project.id, .continuation) {
+            // 用户改过提示词块：按块渲染（编排页与这里共用同一份配置）
+            let blocks = PromptBlockStore.load(project.id, .continuation)
+            let vars = PromptAssembler.vars(project: project,
+                                            context: context,
+                                            instruction: round,
+                                            useCards: useCards,
+                                            useWorld: useWorld,
+                                            useCorpus: useCorpus)
+            compiled = PromptAssembler.compose(project: project,
+                                               context: context,
+                                               instruction: round,
+                                               blocks: blocks,
+                                               vars: vars)
+        } else {
+            compiled = PromptBuilder.compileContinuation(
+                project: project,
+                instruction: round,
+                globalRules: useRules ? ProjectData.globalRules(context: context) : [],
+                bookRules: bookRules,
+                worldEntries: useWorld ? ProjectData.worldEntries(project, context: context) : [],
+                corpusEntries: useCorpus ? ProjectData.corpusEntries(project, context: context) : [],
+                cards: useCards ? project.characterCards : [],
+                contextBudget: settings.contextBudget)
+        }
         preview = compiled
         if !keepPrompts {
             store.setPrompts(project.id,

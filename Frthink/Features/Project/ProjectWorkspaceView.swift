@@ -35,6 +35,7 @@ struct ProjectWorkspaceView: View {
     // 准备工作向导（取代 P0 的制作台）与内容档案
     @State private var showStudio = false
     @State private var showContentPlan = false
+    @State private var showPromptStudio = false
 
     var body: some View {
         TabView(selection: $section) {
@@ -97,6 +98,7 @@ struct ProjectWorkspaceView: View {
                 Menu {
                     Button("翻译（逐段导出）", systemImage: "character.book.closed") { showTranslation = true }
                     Button("长期规则（文风归纳）", systemImage: "text.badge.checkmark") { showRules = true }
+                    Button("提示词编排", systemImage: "list.number") { showPromptStudio = true }
                     Button("快照（正文版本备份）", systemImage: "clock.arrow.circlepath") { showSnapshots = true }
                     Divider()
                     Button("保存快照", systemImage: "plus.square.on.square") { saveSnapshot() }
@@ -136,6 +138,7 @@ struct ProjectWorkspaceView: View {
             }
         }
         .fullScreenCover(isPresented: $showContentPlan) { ModalPage { ContentPlanEditor(project: project) } }
+        .fullScreenCover(isPresented: $showPromptStudio) { ModalPage { PromptStudioView(project: project) } }
         .fullScreenCover(isPresented: $showTranslation) { ModalPage { TranslationView(project: project) } }
         .fullScreenCover(isPresented: $showRules) { ModalPage { RulesView(project: project) } }
         .fullScreenCover(isPresented: $showSnapshots) { ModalPage { SnapshotsView(project: project) } }

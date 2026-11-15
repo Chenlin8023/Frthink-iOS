@@ -14,6 +14,7 @@ struct ChatView: View {
     @State private var streamTask: Task<Void, Never>?
     @State private var showPromptPreview = false
     @State private var pendingInstruction = ""
+    @State private var editingMessage: ChatMessage?
 
     private var messages: [ChatMessage] {
         project.messages.sorted { $0.createdAt < $1.createdAt }
@@ -25,7 +26,10 @@ struct ChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 12) {
                         ForEach(messages) { msg in
-                            BubbleView(message: msg, project: project)
+                            BubbleView(message: msg, project: project,
+                                       onContinue: { send(override: "继续往下写，接上文。") },
+                                       onRewrite: { rewrite(msg) },
+                                       onEdit: { editingMessage = msg })
                                 .id(msg.id)
                         }
                         if streaming {
@@ -76,6 +80,9 @@ struct ChatView: View {
             .padding()
             .background(.bar)
         }
+        .sheet(item: $editingMessage) { msg in
+            BubbleEditSheet(message: msg)
+        }
         .fullScreenCover(isPresented: $showPromptPreview) {
             ModalPage {
                 ContinuationSheet(project: project,
@@ -86,9 +93,17 @@ struct ChatView: View {
         }
     }
 
-    private func send() {
-        let instruction = input
-        input = ""
+    /// RP 式重写：删掉这条回复，按它前面的用户指令重新生成
+    private func rewrite(_ msg: ChatMessage) {
+        let prevUser = messages.last { $0.role == "user" && $0.createdAt < msg.createdAt }?.content ?? ""
+        context.delete(msg)
+        try? context.save()
+        send(override: prevUser.isEmpty ? "重写这一段。" : prevUser)
+    }
+
+    private func send(override: String? = nil) {
+        let instruction = override ?? input
+        if override == nil { input = "" }
         streaming = true
         streamContent = ""
         streamThinking = ""
@@ -187,78 +202,141 @@ struct ChatView: View {
     }
 }
 
-// MARK: - 气泡（含版本切换、追加到正文、思考块）
+// MARK: - 气泡（RP 式：可继续 / 重写 / 编辑 / 版本切换 / 追加到正文）
+//
+// 布局要点：assistant 气泡铺满可用宽度（旧版右侧留了 Spacer(minLength: 48) + 列表 16pt 内边距，
+// 正文右侧固定空出 64pt，长文阅读很浪费）；user 气泡右侧对齐、左侧让出 56pt。
 
 struct BubbleView: View {
     @Bindable var message: ChatMessage
     let project: BookProject
+    var onContinue: (() -> Void)? = nil
+    var onRewrite: (() -> Void)? = nil
+    var onEdit: (() -> Void)? = nil
+
     @Environment(\.modelContext) private var context
     @State private var showThinking = false
 
+    private var isUser: Bool { message.role == "user" }
+
     var body: some View {
-        HStack {
-            if message.role == "user" { Spacer(minLength: 48) }
-            VStack(alignment: .leading, spacing: 6) {
-                if !message.thinking.isEmpty {
-                    DisclosureGroup(isExpanded: $showThinking) {
-                        Text(message.thinking)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .padding(8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.yellow.opacity(0.12))
-                            .cornerRadius(8)
-                    } label: {
-                        Label("思考块", systemImage: "brain")
-                            .font(.caption)
-                    }
-                }
-                Text(message.content)
-                    .textSelection(.enabled)
-                HStack(spacing: 12) {
-                    if message.role == "assistant" {
-                        Button {
-                            project.body += (project.body.hasSuffix("\n") || project.body.isEmpty ? "" : "\n\n") + message.content
-                            project.updatedAt = .now
-                            try? context.save()
-                            SettingsStore.shared.haptic()
-                        } label: {
-                            Label("追加到正文", systemImage: "plus.square.on.square").font(.caption)
-                        }
-                    }
-                    if !message.versions.isEmpty {
-                        Button {
-                            if message.versionIndex > 0 { message.versionIndex -= 1; message.content = message.versions[message.versionIndex] }
-                        } label: { Image(systemName: "chevron.left") }.font(.caption)
-                        Text("\(message.versionIndex + 1)/\(message.versions.count + 1)").font(.caption.monospacedDigit())
-                        Button {
-                            if message.versionIndex < message.versions.count {
-                                message.versionIndex += 1
-                                message.content = message.versions[message.versionIndex]
-                            }
-                        } label: { Image(systemName: "chevron.right") }.font(.caption)
-                    }
-                    Spacer()
-                    Text(message.createdAt.formatted(date: .omitted, time: .shortened))
-                        .font(.caption2).foregroundStyle(.secondary)
-                }
-            }
-            .padding(12)
-            .background(message.role == "user" ? Color.accentColor.opacity(0.15) : Color(.secondarySystemBackground))
-            .cornerRadius(14)
-            if message.role != "user" { Spacer(minLength: 48) }
+        VStack(alignment: .leading, spacing: 6) {
+            if !message.thinking.isEmpty { thinkingBlock }
+            bubble
         }
-        .contextMenu {
-            Button("复制消息") { UIPasteboard.general.string = message.content }
-            if message.role == "assistant" && message.content.count > 0 {
-                Button("设为回复版本快照") {
-                    message.versions.append(message.content)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, isUser ? 56 : 0)
+        .contextMenu { menu }
+    }
+
+    // MARK: 气泡本体
+
+    private var bubble: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(message.content)
+                .textSelection(.enabled)
+                .lineSpacing(4)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            actionRow
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(isUser ? Color.accentColor.opacity(0.15) : Color(.secondarySystemBackground))
+        .cornerRadius(14)
+    }
+
+    // MARK: 思考块
+
+    private var thinkingBlock: some View {
+        DisclosureGroup(isExpanded: $showThinking) {
+            Text(message.thinking)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.yellow.opacity(0.12))
+                .cornerRadius(8)
+        } label: {
+            Label("思考块", systemImage: "brain").font(.caption)
+        }
+    }
+
+    // MARK: 操作行
+
+    private var actionRow: some View {
+        HStack(spacing: 14) {
+            if isUser {
+                Button { onEdit?() } label: { Image(systemName: "pencil") }
+                    .font(.caption)
+            } else {
+                Button { onContinue?() } label: {
+                    Label("继续", systemImage: "arrow.forward.to.line")
                 }
+                .font(.caption)
+
+                Button { onRewrite?() } label: {
+                    Label("重写", systemImage: "arrow.clockwise")
+                }
+                .font(.caption)
+
+                Button {
+                    project.body += (project.body.hasSuffix("\n") || project.body.isEmpty ? "" : "\n\n") + message.content
+                    project.updatedAt = .now
+                    try? context.save()
+                    SettingsStore.shared.haptic()
+                } label: {
+                    Label("追加到正文", systemImage: "plus.square.on.square")
+                }
+                .font(.caption)
+
+                Button { onEdit?() } label: { Image(systemName: "pencil") }
+                    .font(.caption)
             }
-            Button("删除气泡", role: .destructive) {
-                context.delete(message)
-                try? context.save()
+
+            versionSwitcher
+            Spacer()
+            Text(message.createdAt.formatted(date: .omitted, time: .shortened))
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private var versionSwitcher: some View {
+        if !message.versions.isEmpty {
+            HStack(spacing: 6) {
+                Button {
+                    if message.versionIndex > 0 {
+                        message.versionIndex -= 1
+                        message.content = message.versions[message.versionIndex]
+                    }
+                } label: { Image(systemName: "chevron.left") }
+
+                Text("\(message.versionIndex + 1)/\(message.versions.count + 1)")
+                    .font(.caption.monospacedDigit())
+
+                Button {
+                    if message.versionIndex < message.versions.count {
+                        message.versionIndex += 1
+                        message.content = message.versions[message.versionIndex]
+                    }
+                } label: { Image(systemName: "chevron.right") }
             }
+            .font(.caption)
+        }
+    }
+
+    // MARK: 长按菜单
+
+    @ViewBuilder
+    private var menu: some View {
+        Button("复制消息") { UIPasteboard.general.string = message.content }
+        if !isUser {
+            Button("存为版本快照") { message.versions.append(message.content) }
+            Button("继续写") { onContinue?() }
+        }
+        Button("删除气泡", role: .destructive) {
+            context.delete(message)
+            try? context.save()
         }
     }
 }
@@ -291,6 +369,43 @@ struct StreamingBubbleView: View {
             .background(Color(.secondarySystemBackground))
             .cornerRadius(14)
             Spacer(minLength: 48)
+        }
+    }
+}
+
+/// 编辑单条气泡（RP 式：改完直接改库里的内容，旧内容进 versions）
+struct BubbleEditSheet: View {
+    @Bindable var message: ChatMessage
+    @Environment(\.modelContext) private var context
+    @Environment(\.dismiss) private var dismiss
+    @State private var text = ""
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("内容") {
+                    TextEditor(text: $text)
+                        .font(.body)
+                        .frame(minHeight: 260)
+                }
+                Section {
+                    Text("\(text.count) 字").font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("编辑气泡")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") {
+                        message.versions.append(message.content)
+                        message.content = text
+                        try? context.save()
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear { text = message.content }
         }
     }
 }
