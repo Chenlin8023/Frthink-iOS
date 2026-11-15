@@ -119,14 +119,20 @@ enum PromptBuilder {
         segment: String
     ) -> Compiled {
         let system = withGlobalPreset("""
-        你是小说人物资料整理助手。根据给定正文片段，提取人物事实。
-        要求：
-        - 只依据正文，证据不足则留空，不推测未发生的行动。
-        - 只输出本片段新增、且不在已有人物卡中的事实；禁止返回旧信息或整段替换。
-        - 先结合上下文判断身份再去重：本名归一，别称归入 aliases；泛称（代词、职业称呼）不单独作为身份依据。
-        - 只输出 JSON 本体，不要 markdown 代码围栏，不要在 JSON 前后写任何解释。
-        - 输出严格 JSON：{"characters":[{"name":"","aliases":"","identity":"","goals":"","personality":"","speech":"","memories":"","attitudes":""}]}
-        - 没有新人物时输出 {"characters":[]}。不要输出其他内容。
+        你是小说人物资料整理助手。读一段正文，输出这段里出现的人物事实，供后续写作引用。
+只依据正文；证据不足就留空；不推测未发生的行动；不写剧情摘要。
+
+输出要求（违反会导致整段数据无法导入）：
+- 只输出一个 JSON 对象，不要 markdown 代码围栏，不要在 JSON 前后写任何文字。
+- 所有字段值都是字符串；字段内禁止换行，多个内容用「；」分隔。
+- 没有信息的字段填空字符串 ""，不要写 null，不要省略字段。
+- 每段最多输出 8 个角色，只收有名字的人物（代词、职业泛称不算）。
+- 已有角色只补充新增事实，不要重复已知信息，不要整段替换。
+- 本名归一，别称放进 aliases；身份判断不出就留空。
+
+输出结构：
+{"characters":[{"name":"本名","aliases":"别称1；别称2","identity":"身份与处境","goals":"目标与动机","personality":"性格","speech":"说话方式","memories":"该角色已知的信息","attitudes":"对谁什么态度","boundaries":"边界与未知"}]}
+没有新人物时输出 {"characters":[]}。
         """)
         var user = "【已有人物卡】\n"
         user += existingCards.isEmpty ? "（无）\n" :
@@ -263,6 +269,66 @@ enum PromptBuilder {
         }
         flush()
         return result
+    }
+
+    /// 人物卡专用解析：容忍裸数组、字段内裸换行、尾随逗号、代码围栏。
+    /// 返回 nil 表示确实拿不到可用的 characters 数组（调用方应把原始片段写进日志）。
+    static func extractCharacters(from text: String) -> [[String: Any]]? {
+        if let arr = charactersArray(from: text) { return arr }
+
+        // 修复常见 JSON 破损：字符串内的裸换行、尾随逗号，再试一次
+        let repaired = sanitizeJSON(stripCodeFence(text))
+        if let arr = charactersArray(from: repaired) { return arr }
+
+        // 只有 `{...}` 但被截断：尝试补上结尾（最多补三层）
+        for suffix in ["}]}", "}]", "}"] {
+            if let arr = charactersArray(from: repaired + suffix) { return arr }
+        }
+        return nil
+    }
+
+    private static func charactersArray(from text: String) -> [[String: Any]]? {
+        let body = stripCodeFence(text)
+        if let data = extractJSONObject(from: body),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let arr = obj["characters"] as? [[String: Any]] {
+            return arr
+        }
+        // 裸数组
+        if let first = body.firstIndex(of: "["), let last = body.lastIndex(of: "]"), first < last,
+           let data = String(body[first...last]).data(using: .utf8),
+           let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            return arr
+        }
+        return nil
+    }
+
+    static func stripCodeFence(_ text: String) -> String {
+        var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if s.hasPrefix("```") {
+            s = s.replacingOccurrences(of: "```json", with: "")
+                .replacingOccurrences(of: "```JSON", with: "")
+                .replacingOccurrences(of: "```", with: "")
+        }
+        return s.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// 把 JSON 字符串内部的裸换行换成「；」，并去掉尾随逗号
+    static func sanitizeJSON(_ text: String) -> String {
+        var out = ""
+        out.reserveCapacity(text.count)
+        var inString = false
+        var escaped = false
+        for ch in text {
+            if escaped { out.append(ch); escaped = false; continue }
+            if ch == "\\" { out.append(ch); escaped = true; continue }
+            if ch == "\"" { inString.toggle(); out.append(ch); continue }
+            if inString && (ch == "\n" || ch == "\r") { out.append("；"); continue }
+            out.append(ch)
+        }
+        return out
+            .replacingOccurrences(of: ",}", with: "}")
+            .replacingOccurrences(of: ",]", with: "]")
     }
 
     /// 从 AI 输出中提取 JSON（兼容 ```json 包裹）

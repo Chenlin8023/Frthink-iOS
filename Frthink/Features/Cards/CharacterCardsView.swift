@@ -222,81 +222,106 @@ struct CharacterOrganizeSheet: View {
         let source = AnalysisScope.text(for: project)
         let segments = PromptBuilder.segments(of: source, budget: SettingsStore.shared.segmentBudget)
         refreshTemplate()
+        guard !segments.isEmpty else { log = ["锚前没有可分析的正文"]; return }
+        guard SettingsStore.shared.activeCredential != nil else { log = ["尚未配置凭证"]; return }
+
         running = true
-        processed = 0; newCount = 0; log = []
-        log.append("作用范围：\(AnalysisScope.label(for: project))，共 \(segments.count) 段")
-        processed = 0; newCount = 0; log = []
-        guard let cred = SettingsStore.shared.activeCredential else {
-            log.append("尚未配置凭证"); running = false; return
-        }
-        var cred2 = cred
-        let m = SettingsStore.shared.model(for: "extract")
-        if !m.isEmpty { cred2.model = m }
+        processed = 0
+        newCount = 0
+        log = ["作用范围：\(AnalysisScope.label(for: project))，共 \(segments.count) 段"]
 
         task = Task {
             for (i, seg) in segments.enumerated() {
                 if Task.isCancelled { break }
-                await MainActor.run { progress = "第 \(i+1)/\(segments.count) 段" }
-                let existing = project.characterCards
+                progress = "第 \(i + 1)/\(segments.count) 段"
+
                 let compiled = PromptBuilder.compileCharacterExtraction(project: project,
-                                                                        existingCards: existing, segment: seg)
-                var got = ""
-                let done = await withCheckedContinuation { cont in
-                    _ = LlmClient.shared.stream(credential: cred2, messages: compiled.messages,
-                                                temperature: 0.3, maxTokens: 2000) { ev in
-                        if !ev.contentDelta.isEmpty { got += ev.contentDelta }
-                        if let f = ev.finished {
-                            if f == "error:任务已停止" {
-                                Task { await MainActor.run { log.append("⏹ 已停止") } }
-                                cont.resume(returning: false)
-                            } else if f.hasPrefix("error:") {
-                                Task { await MainActor.run { log.append("❌ \(f)") } }
-                                cont.resume(returning: false)
-                            } else {
-                                cont.resume(returning: true)
-                            }
-                        }
+                                                                        existingCards: project.characterCards,
+                                                                        segment: seg)
+                let spec = AiTaskSpec(slot: .worker, temperature: 0.3, maxTokens: 6000,
+                                      stage: "character", taskLabel: "整理")
+                do {
+                    let r = try await AiRunner.run(spec: spec, messages: compiled.messages,
+                                                   context: context, projectID: project.id)
+                    guard let chars = PromptBuilder.extractCharacters(from: r.text) else {
+                        let preview = String(r.text.prefix(120)).replacingOccurrences(of: "\n", with: " ")
+                        log.append("第 \(i + 1) 段无有效 JSON（\(r.finish.label)）：\(preview)")
+                        continue
                     }
-                }
-                guard done, let data = PromptBuilder.extractJSONObject(from: got),
-                      let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                      let chars = obj["characters"] as? [[String: Any]] else {
-                    await MainActor.run { log.append("第 \(i+1) 段没有返回有效 JSON，已跳过") }
-                    continue
-                }
-                await MainActor.run {
-                    var added = 0
-                    for c in chars {
-                        guard let nm = c["name"] as? String, !nm.isEmpty else { continue }
-                        // 去重：同名或别称命中 → 合并新字段（只增不减）
-                        if let exist = project.characterCards.first(where: {
-                            $0.name == nm || $0.aliases.contains(nm)
-                        }) {
-                            if let v = c["aliases"] as? String, !v.isEmpty, !exist.aliases.contains(v) {
-                                exist.aliases += (exist.aliases.isEmpty ? "" : "、") + v }
-                            if let v = c["memories"] as? String, !v.isEmpty { exist.memories += "\n" + v }
-                            if let v = c["attitudes"] as? String, !v.isEmpty { exist.attitudes += "\n" + v }
-                            if (exist.personality.isEmpty), let v = c["personality"] as? String { exist.personality = v }
-                        } else {
-                            let card = CharacterCard(project: project, name: nm)
-                            card.aliases = (c["aliases"] as? String) ?? ""
-                            card.identity = (c["identity"] as? String) ?? ""
-                            card.goals = (c["goals"] as? String) ?? ""
-                            card.personality = (c["personality"] as? String) ?? ""
-                            card.speech = (c["speech"] as? String) ?? ""
-                            card.memories = (c["memories"] as? String) ?? ""
-                            card.attitudes = (c["attitudes"] as? String) ?? ""
-                            context.insert(card)
-                            added += 1
-                        }
-                    }
-                    newCount += added
+                    let added = apply(chars)
                     processed += 1
-                    log.append("第 \(i+1) 段完成：新建 \(added) 张卡")
-                    try? context.save()
+                    newCount += added
+                    log.append("第 \(i + 1) 段：新建 \(added) 张，解析 \(chars.count) 个角色")
+                } catch {
+                    log.append("第 \(i + 1) 段失败：\(error.localizedDescription)")
                 }
             }
-            await MainActor.run { running = false }
+            running = false
+            progress = ""
+            try? context.save()
         }
+    }
+
+    /// 写入卡片：同名或别称命中就补字段（只增不减），否则新建
+    @discardableResult
+    private func apply(_ chars: [[String: Any]]) -> Int {
+        var added = 0
+        for c in chars {
+            let nm = str(c["name"])
+            guard !nm.isEmpty else { continue }
+            if let exist = project.characterCards.first(where: {
+                $0.name == nm || $0.aliases.contains(nm)
+            }) {
+                merge(exist, c)
+            } else {
+                let card = CharacterCard(project: project, name: nm)
+                card.aliases = str(c["aliases"])
+                card.identity = str(c["identity"])
+                card.goals = str(c["goals"])
+                card.personality = str(c["personality"])
+                card.speech = str(c["speech"])
+                card.memories = str(c["memories"])
+                card.attitudes = str(c["attitudes"])
+                card.boundaries = str(c["boundaries"])
+                context.insert(card)
+                added += 1
+            }
+        }
+        return added
+    }
+
+    private func merge(_ card: CharacterCard, _ c: [String: Any]) {
+        card.aliases = mergeList(card.aliases, str(c["aliases"]))
+        if card.identity.isEmpty { card.identity = str(c["identity"]) }
+        if card.goals.isEmpty { card.goals = str(c["goals"]) }
+        if card.personality.isEmpty { card.personality = str(c["personality"]) }
+        if card.speech.isEmpty { card.speech = str(c["speech"]) }
+        card.memories = appendLine(card.memories, str(c["memories"]))
+        card.attitudes = appendLine(card.attitudes, str(c["attitudes"]))
+        card.boundaries = appendLine(card.boundaries, str(c["boundaries"]))
+        card.updatedAt = .now
+    }
+
+    private func str(_ v: Any?) -> String {
+        ((v as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func mergeList(_ a: String, _ b: String) -> String {
+        guard !b.isEmpty else { return a }
+        var seen = Set<String>()
+        var out: [String] = []
+        for part in (a + "、" + b).components(separatedBy: CharacterSet(charactersIn: "、,，;；/ ")) {
+            let t = part.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty || seen.contains(t) { continue }
+            seen.insert(t)
+            out.append(t)
+        }
+        return out.joined(separator: "、")
+    }
+
+    private func appendLine(_ a: String, _ b: String) -> String {
+        guard !b.isEmpty else { return a }
+        if a.contains(b) { return a }
+        return a.isEmpty ? b : a + "\n" + b
     }
 }
