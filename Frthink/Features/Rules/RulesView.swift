@@ -120,37 +120,46 @@ struct RuleInductSheet: View {
     private func compile() {
         let existing = ((try? context.fetch(FetchDescriptor<WritingRule>())) ?? [])
             .filter { $0.project == project && $0.kind == "style" }.map(\.line)
-        let seg = AnalysisScope.tailText(for: project,
-                                              fallbackChars: SettingsStore.shared.segmentBudget * 2)
+        let segs = PromptBuilder.segments(of: AnalysisScope.text(for: project), budget: SettingsStore.shared.segmentBudget)
+        let seg = segs.first ?? ""
         let compiled = PromptBuilder.compileRuleInduction(existingRules: existing, segment: seg)
         sysText = compiled.messages[0].content
         userText = compiled.messages[1].content
     }
 
     private func run() {
+        let source = AnalysisScope.text(for: project)
+        let segs = PromptBuilder.segments(of: source, budget: SettingsStore.shared.segmentBudget)
+        guard !segs.isEmpty else { errorText = "锚前没有可分析的正文"; return }
+        guard SettingsStore.shared.activeCredential != nil else { errorText = "尚未配置凭证"; return }
+
         running = true
         errorText = nil
-        notice = ""
-        guard let cred0 = SettingsStore.shared.activeCredential else { running = false; errorText = "尚未配置凭证"; return }
-        var cred = cred0
-        let m = SettingsStore.shared.model(for: "extract")
-        if !m.isEmpty { cred.model = m }
-        var acc = ""
-        task = LlmClient.shared.stream(
-            credential: cred,
-            messages: [LlmMessage(role: "system", content: sysText),
-                       LlmMessage(role: "user", content: userText)],
-            temperature: 0.4) { ev in
-            if !ev.contentDelta.isEmpty { acc += ev.contentDelta }
-            if let f = ev.finished {
-                DispatchQueue.main.async {
-                    running = false
-                    if f.hasPrefix("error:") { errorText = f; return }
-                    rawText = acc
-                    let n = saveParsed()
-                    notice = n > 0 ? "已自动解析并保存 \(n) 条规则"
-                                   : "已收到回复但未能自动解析——可在上方修正文本后点「解析并保存」"
+        rawText = ""
+        notice = "0/\(segs.count)"
+
+        var collected: [String] = []
+        task = Task {
+            for (i, seg) in segs.enumerated() {
+                if Task.isCancelled { break }
+                let compiled = PromptBuilder.compileRuleInduction(existingRules: ((try? context.fetch(FetchDescriptor<WritingRule>())) ?? []).filter { $0.project == project && $0.kind == "style" }.map(\.line), segment: seg)
+                let spec = AiTaskSpec(slot: .worker, temperature: 0.4, maxTokens: nil,
+                                      stage: "rule", taskLabel: "整理")
+                do {
+                    let r = try await AiRunner.run(spec: spec, messages: compiled.messages,
+                                                   context: context, projectID: project.id)
+                    collected.append(r.text)
+                } catch {
+                    await MainActor.run { errorText = error.localizedDescription }
+                    break
                 }
+                await MainActor.run { notice = "第 \(i + 1)/\(segs.count) 段" }
+            }
+            let joined = collected.joined(separator: "\n")
+            await MainActor.run {
+                running = false
+                rawText = joined
+                _ = saveParsed()
             }
         }
     }

@@ -129,7 +129,7 @@ struct SettingsView: View {
     private var budgetSection: some View {
         Section("预算") {
             Stepper("注入正文尾部 \(settings.contextBudget) 字", value: $settings.contextBudget, in: 500...30000, step: 500)
-            Stepper("整理单段 \(settings.segmentBudget) 字", value: $settings.segmentBudget, in: 500...10000, step: 500)
+            Stepper("每次上传 \(settings.segmentBudget) 字", value: $settings.segmentBudget, in: 1000...20000, step: 1000)
             Stepper(String(format: "批量每章估价上限 ¥%.2f", settings.perChapterBudget),
                     value: $settings.perChapterBudget, in: 0.05...2.0, step: 0.05)
             Text("批量生成/重制时，累计花费＋本章估价超过预算就停（母版 est=0.2 同量级）。")

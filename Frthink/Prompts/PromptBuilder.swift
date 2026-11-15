@@ -215,22 +215,44 @@ enum PromptBuilder {
             (ns.substring(with: m.range).trimmingCharacters(in: .whitespaces), m.range.location)
         }
     }
-
-    /// 按段切分正文（空行分段），每段不超过 budget 字符
+    /// 按预算切段：优先在空行（段落）边界切，并**尽量把每段填满 budget**。
+    ///
+    /// 旧实现是"一个自然段 = 一次请求"，budget 只用来切超长段，
+    /// 于是 3000 个自然段就是 3000 次调用——批次爆炸、产物零碎、耗时与花费都失控。
     static func segments(of text: String, budget: Int = 3000) -> [String] {
+        let limit = max(300, budget)
         var result: [String] = []
-        for para in text.components(separatedBy: "\n\n") where !para.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if para.count <= budget {
-                result.append(para)
-            } else {
+        var buffer = ""
+
+        func flush() {
+            let t = buffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { result.append(t) }
+            buffer = ""
+        }
+
+        for raw in text.components(separatedBy: "\n\n") {
+            let para = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if para.isEmpty { continue }
+
+            if para.count >= limit {
+                flush()
                 var start = para.startIndex
                 while start < para.endIndex {
-                    let end = para.index(start, offsetBy: min(budget, para.distance(from: start, to: para.endIndex)))
+                    let take = min(limit, para.distance(from: start, to: para.endIndex))
+                    let end = para.index(start, offsetBy: take)
                     result.append(String(para[start..<end]))
                     start = end
                 }
+            } else if buffer.isEmpty {
+                buffer = para
+            } else if buffer.count + 2 + para.count <= limit {
+                buffer += "\n\n" + para
+            } else {
+                flush()
+                buffer = para
             }
         }
+        flush()
         return result
     }
 

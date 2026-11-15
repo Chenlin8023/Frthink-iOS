@@ -53,7 +53,7 @@ final class SettingsStore {
         let wk = defaults.string(forKey: "model.worker") ?? ""
         let pcb = defaults.object(forKey: "budget.perChapter") as? Double ?? 0.2
         let cb = defaults.object(forKey: "budget.context") as? Int ?? 6000
-        let sb = defaults.object(forKey: "budget.segment") as? Int ?? 3000
+        let sb = defaults.object(forKey: "budget.segment") as? Int ?? 6000
         let tp = defaults.object(forKey: "gen.temperature") as? Double ?? 1.0
         let mt = defaults.object(forKey: "gen.maxTokens") as? Int ?? 4096
         let hp = defaults.object(forKey: "ui.haptics") as? Bool ?? true
