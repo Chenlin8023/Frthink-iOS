@@ -79,6 +79,7 @@ final class ChatMessage {
     var versions: [String]          // 历史版本（保留旧版本）
     var versionIndex: Int           // 当前展示的版本
     var finishReason: String
+    var sessionID: UUID?            // 归属的续写会话（nil = 旧数据，视为默认会话）
     var inputTokens: Int
     var outputTokens: Int
     var cachedTokens: Int
@@ -96,6 +97,29 @@ final class ChatMessage {
         self.inputTokens = 0
         self.outputTokens = 0
         self.cachedTokens = 0
+    }
+}
+
+// MARK: - 续写会话（酒馆式「新对话」：每次续写是一个独立会话，各自记住自己的锚）
+
+@Model
+final class WritingSession {
+    @Attribute(.unique) var id: UUID
+    var project: BookProject?
+    var name: String
+    var anchorOffset: Int           // 创建会话时的锚位置
+    var createdAt: Date
+    var updatedAt: Date
+    var mergedAt: Date?             // 已合并进正文的时间
+
+    init(project: BookProject?, name: String, anchorOffset: Int) {
+        self.id = UUID()
+        self.project = project
+        self.name = name
+        self.anchorOffset = anchorOffset
+        self.createdAt = .now
+        self.updatedAt = .now
+        self.mergedAt = nil
     }
 }
 

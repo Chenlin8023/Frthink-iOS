@@ -5,6 +5,9 @@ import SwiftData
 struct ChatView: View {
     @Bindable var project: BookProject
     @Environment(\.modelContext) private var context
+    @Query private var allSessions: [WritingSession]
+    @State private var currentSessionID: UUID?
+    @State private var streamingSessionID: UUID?
     @State private var input = ""
     @State private var streaming = false
     @State private var streamContent = ""
@@ -21,15 +24,30 @@ struct ChatView: View {
     private var messages: [ChatMessage] {
         project.messages.sorted { $0.createdAt < $1.createdAt }
     }
+    private var sessions: [WritingSession] {
+        allSessions.filter { $0.project == project }.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    private var currentSession: WritingSession? {
+        sessions.first { $0.id == currentSessionID }
+    }
+
+    /// 当前会话里的消息；没有会话时显示旧数据（sessionID == nil）
+    private var visibleMessages: [ChatMessage] {
+        let all = messages
+        if let c = currentSession { return all.filter { $0.sessionID == c.id } }
+        return all.filter { $0.sessionID == nil }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             rpHeader
             injectionBar
+sessionBar
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(Array(messages.enumerated()), id: \.offset) { pair in
+                        ForEach(Array(visibleMessages.enumerated()), id: \.offset) { pair in
                             BubbleView(message: pair.element, project: project, floor: pair.offset + 1,
                                        onContinue: { send(override: "继续往下写，接上文。") },
                                        onRewrite: { rewrite(pair.element) },
@@ -87,6 +105,9 @@ struct ChatView: View {
         }
                 .fullScreenCover(isPresented: $showPromptStudio) { ModalPage { PromptStudioView(project: project) } }
         .fullScreenCover(isPresented: $showAnchorSheet) { ModalPage { AnchorSheet(project: project) } }
+        .onAppear {
+            if currentSessionID == nil, let last = sessions.last { currentSessionID = last.id }
+        }
         .sheet(item: $editingMessage) { msg in
             BubbleEditSheet(message: msg)
         }
@@ -139,6 +160,90 @@ struct ChatView: View {
 
     // MARK: 注入条（一眼看到本轮会注入多少）
 
+    // MARK: 会话条（酒馆式：每次续写是一个独立对话，各自记住自己的锚）
+
+    private var sessionBar: some View {
+        HStack(spacing: 10) {
+            Menu {
+                ForEach(sessions) { s in
+                    Button {
+                        currentSessionID = s.id
+                    } label: {
+                        Text("\(s.name) · 锚 \(s.anchorOffset)")
+                    }
+                }
+                Divider()
+                Button("新建对话（用当前锚）") { newSession() }
+            } label: {
+                Label(currentSession?.name ?? "默认对话",
+                      systemImage: "bubble.left.and.text.bubble.right")
+                    .font(.caption)
+            }
+
+            Spacer()
+
+            if let s = currentSession, s.mergedAt != nil {
+                Text("已合并").font(.caption2).foregroundStyle(.secondary)
+            }
+
+            Button {
+                mergeSession()
+            } label: {
+                Label("合并到正文", systemImage: "arrow.down.to.line").font(.caption)
+            }
+            .disabled(visibleMessages.filter { $0.role == "assistant" }.isEmpty)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+        .background(Color(.secondarySystemBackground))
+    }
+
+    // MARK: 会话动作
+
+    @discardableResult
+    private func ensureSession() -> UUID {
+        if let c = currentSession { return c.id }
+        let s = WritingSession(project: project,
+                               name: "续写 \(sessions.count + 1)",
+                               anchorOffset: AnalysisScope.anchor(of: project))
+        context.insert(s)
+        try? context.save()
+        currentSessionID = s.id
+        return s.id
+    }
+
+    private func newSession() {
+        let s = WritingSession(project: project,
+                               name: "续写 \(sessions.count + 1)",
+                               anchorOffset: AnalysisScope.anchor(of: project))
+        context.insert(s)
+        try? context.save()
+        currentSessionID = s.id
+    }
+
+    /// 把本会话里所有 assistant 回复按顺序拼起来，插到会话记录的锚位置（采纳前先快照）
+    private func mergeSession() {
+        guard let s = currentSession else { return }
+        let parts = visibleMessages
+            .filter { $0.role == "assistant" && !$0.content.isEmpty }
+            .map(\.content)
+        guard !parts.isEmpty else { return }
+        let merged = parts.joined(separator: "\n\n")
+
+        context.insert(BodySnapshot(project: project, label: "合并续写前", body: project.body))
+
+        let anchor = min(max(s.anchorOffset, 0), project.body.count)
+        let head = TextSurgery.slice(project.body, start: 0, end: anchor)
+        let joined = head + (head.hasSuffix("\n") ? "\n" : "\n\n") + merged
+        project.body = joined
+        project.anchorOffset = joined.count
+        project.updatedAt = .now
+        s.mergedAt = .now
+        s.updatedAt = .now
+        try? context.save()
+        SettingsStore.shared.haptic()
+    }
+
     private var injectionBar: some View {
         let cards = project.characterCards.filter(\.enabled).count
         let corpus = ProjectData.corpusEntries(project, context: context).count
@@ -164,7 +269,7 @@ struct ChatView: View {
                 Label("继续", systemImage: "arrow.forward.to.line")
             }
             Button {
-                if let last = messages.last(where: { $0.role == "assistant" }) { rewrite(last) }
+                if let last = visibleMessages.last(where: { $0.role == "assistant" }) { rewrite(last) }
             } label: {
                 Label("重写上一条", systemImage: "arrow.clockwise")
             }
@@ -186,7 +291,7 @@ struct ChatView: View {
 
     /// RP 式重写：删掉这条回复，按它前面的用户指令重新生成
     private func rewrite(_ msg: ChatMessage) {
-        let prevUser = messages.last { $0.role == "user" && $0.createdAt < msg.createdAt }?.content ?? ""
+        let prevUser = visibleMessages.last { $0.role == "user" && $0.createdAt < msg.createdAt }?.content ?? ""
         context.delete(msg)
         try? context.save()
         send(override: prevUser.isEmpty ? "重写这一段。" : prevUser)
@@ -196,13 +301,16 @@ struct ChatView: View {
         let instruction = override ?? input
         if override == nil { input = "" }
         streaming = true
+                streamingSessionID = ensureSession()
         streamContent = ""
         streamThinking = ""
         errorText = nil
         statusText = "正在生成…可发送停止"
 
         if !instruction.isEmpty {
-            context.insert(ChatMessage(project: project, role: "user", content: instruction))
+            let um = ChatMessage(project: project, role: "user", content: instruction)
+            um.sessionID = ensureSession()
+            context.insert(um)
             try? context.save()
         }
 
@@ -273,6 +381,7 @@ struct ChatView: View {
                                 content: "生成失败：\(finishReason)")
             }
             m.finishReason = finishReason
+            m.sessionID = streamingSessionID
             context.insert(m); try? context.save()
             return
         }
@@ -287,6 +396,7 @@ struct ChatView: View {
         let m = ChatMessage(project: project, role: "assistant", content: streamContent + truncNote)
         m.thinking = streamThinking
         m.finishReason = finishReason
+        m.sessionID = streamingSessionID
         context.insert(m)
         try? context.save()
         SettingsStore.shared.haptic()

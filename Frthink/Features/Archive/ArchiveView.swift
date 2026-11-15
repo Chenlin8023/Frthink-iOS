@@ -44,6 +44,7 @@ struct ArchiveView: View {
 
     @State private var pane: ArchivePane = .setting
     @State private var query = ""
+    @State private var showMerge = false
 
     @State private var showOrganize = false
     @State private var editingCard: CharacterCard?
@@ -69,6 +70,15 @@ struct ArchiveView: View {
     private var events: [PlotEvent] { allEvents.filter { $0.project == project } }
     private var rules: [WritingRule] {
         allRules.filter { $0.project == project }
+    }
+
+    private var mergeKind: MergeKind {
+        switch pane {
+        case .setting: return .setting
+        case .character: return .character
+        case .plot: return .plot
+        case .style: return .style
+        }
     }
 
     private func hit(_ s: String) -> Bool {
@@ -105,6 +115,7 @@ struct ArchiveView: View {
         .sheet(isPresented: $showNewEvent) { EventEditor(project: project, event: nil) }
         .sheet(isPresented: $showExtract) { EventExtractSheet(project: project) }
         .sheet(item: $editingRule) { r in RuleEditSheet(rule: r) }
+        .sheet(isPresented: $showMerge) { ArchiveMergeSheet(project: project, kind: mergeKind) }
         .onChange(of: requestPane) { _, newValue in
             if let newValue {
                 pane = newValue
@@ -149,7 +160,6 @@ struct ArchiveView: View {
                 switch pane {
                 case .setting:
                     Button("收集事实到语料") { showCorpusCollect = true }
-                    Button("添加内置参考材料（基调 / 世界观）") { addBuiltinReferences() }
                     Button("查看语料库") { showCorpusList = true }
                     Button("新增设定词条") { showNewEntry = true }
                 case .character:
@@ -164,6 +174,11 @@ struct ArchiveView: View {
             } label: {
                 Label("动作", systemImage: "wand.and.stars")
                     .font(.caption)
+            }
+            Button {
+                showMerge = true
+            } label: {
+                Image(systemName: "arrow.triangle.merge").font(.caption)
             }
         }
         .padding(.horizontal, 16)
@@ -325,32 +340,6 @@ struct ArchiveView: View {
         } header: {
             Text("文风规则（\(list.count)）")
         }
-    }
-}
-
-extension ArchiveView {
-    /// 把内置的基调 / 世界观预设写成「默认关闭」的设定词条，由用户自行勾选。
-    /// 这样"基调与尺度"不再是一个独立机制，而是可选资料。
-    func addBuiltinReferences() {
-        let existing = Set(entries.map { $0.title })
-        var added = 0
-        for p in ContentKit.tonePresets {
-            let title = "参考·基调·\(p.name)"
-            if existing.contains(title) { continue }
-            let e = WorldEntry(project: project, title: title, keywords: "", content: p.tone)
-            e.enabled = false
-            context.insert(e)
-            added += 1
-        }
-        for w in ContentKit.worldPresets {
-            let title = "参考·世界观·\(w.name)"
-            if existing.contains(title) { continue }
-            let e = WorldEntry(project: project, title: title, keywords: "", content: w.text)
-            e.enabled = false
-            context.insert(e)
-            added += 1
-        }
-        try? context.save()
     }
 }
 

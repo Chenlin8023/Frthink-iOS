@@ -96,67 +96,6 @@ enum ContentKit {
     /// 群体场面的判词（母版 autotags 自查口径）
     static let groupSceneWords: [String] = ["多P", "群交", "3P", "双飞", "交换"]
 
-    // MARK: - 基调预设（母版 index.html:370-393 原文）
-
-    struct TonePreset: Identifiable {
-        var name: String
-        var tone: String
-        var opts: [String]
-        var cadenceStart: Int
-        var cadenceEvery: Int
-        var dimSet: DimSet
-        var id: String { name }
-    }
-
-    static let tonePresets: [TonePreset] = [
-        TonePreset(
-            name: "轻喜剧",
-            tone: "日常向轻喜剧，两人互相喜欢，做爱是件开心事，不是考验。对话多、反应夸张、有笑点，允许笑场、吐槽、中途打断。成年向，写具体，不写抒情，不留心理阴影。",
-            opts: ["户外", "角色扮演"], cadenceStart: 4, cadenceEvery: 2, dimSet: .vanilla),
-        TonePreset(
-            name: "纯爱慢热",
-            tone: "温柔日常，关系健康，情绪克制而细腻。先有信任再有身体，节奏慢，重心在两个人怎么靠近。成年向，写具体但不激烈。",
-            opts: [], cadenceStart: 6, cadenceEvery: 3, dimSet: .vanilla),
-        TonePreset(
-            name: "冷调悬疑",
-            tone: "悬疑冷硬，性事与危险交织，情绪不外露。描写克制但具体，不解释感受，只写动作和后果。",
-            opts: ["放置", "露出", "女攻"], cadenceStart: 4, cadenceEvery: 2, dimSet: .vanilla),
-        TonePreset(
-            name: "调教向",
-            tone: "权力关系明确，主从分明，服从与奖励是主轴。写得具体，不回避，不淡出。",
-            opts: ["捆绑", "放置", "言语侮辱", "后入"], cadenceStart: 3, cadenceEvery: 2, dimSet: .vanilla),
-        TonePreset(
-            name: "官能直给",
-            tone: "欲望驱动。短句，节奏快，少铺垫，多动作和对白，不写心理独白。",
-            opts: ["后入", "深喉", "乳头交", "合意强暴", "扩肛"], cadenceStart: 2, cadenceEvery: 1, dimSet: .vanilla),
-        TonePreset(
-            name: "双形态切换",
-            tone: "日常与变身交替，两种状态来回拉扯，情绪反差大。写具体，注意两种形态的身体差异。",
-            opts: ["白虎", "户外", "尿道开发", "大尺寸扶她"], cadenceStart: 4, cadenceEvery: 2, dimSet: .vanilla),
-        TonePreset(
-            name: "寝取",
-            tone: "第三者主导，但根子是内因：她的忠贞是外壳，底下藏着从未被满足的癖好，第三者只是撬开它的那个人。他必须有具体的权力来源（把柄、债务、职位、旧恩）和明确想要的东西，威胁必须可信，不能只是一味强势。三个人的变化要递进：她 察觉→确认→默许→共谋→崩坏；他 愤怒→自我说服→合理化→旁观成瘾→同谋；第三者 试探→加码→支配→收网。每六章至少推进一格，不许原地。秘密分层：读者知道多少、她知道多少、他知道多少，每八章揭一层。主角允许无力，但不许一个表情演到底。每八章回收一条旧伏笔。结尾必须有一个不可逆的结果。耻辱当兴奋写，不当痛苦写；旁白为主，多写视点人物的观察和心理。",
-            opts: ["合意强暴", "言语侮辱", "露出", "放置", "女攻"], cadenceStart: 4, cadenceEvery: 2, dimSet: .ntr)
-    ]
-
-    // MARK: - 世界观预设（母版 index.html:360-368 原文）
-
-    struct WorldPreset: Identifiable {
-        var name: String
-        var text: String
-        var id: String { name }
-    }
-
-    static let worldPresets: [WorldPreset] = [
-        WorldPreset(name: "都市现代", text: "现在的城市。有手机、汽车、电梯、监控，警察管用，开房要身份证。上班挣钱、还房贷，出事能报警，也能被拍下来发到网上。"),
-        WorldPreset(name: "武侠江湖", text: "古代江湖。没有电、手机、汽车、公司和官府办案。走路由马和船，传话靠人和信鸽，付钱用银子。门派、镖局、客栈、渡口、破庙、药铺。"),
-        WorldPreset(name: "东方仙侠", text: "修真界。有宗门、灵脉、丹药、法器，能御剑飞。没灵根连门槛都进不去，规矩是宗门定的，长老一句话定生死。"),
-        WorldPreset(name: "西方玄幻", text: "剑与魔法的大陆。有王国、城堡、教会、行会、酒馆和森林。国王和领主说了算，教会管戒律，行会管价钱；雇人办事要给金币。没有电也没有枪。"),
-        WorldPreset(name: "民国近代", text: "民国年间。黄包车、租界、巡捕、报馆、烟馆、当铺。银元最硬，兵和巡捕谁都惹不起，女人没靠山就只能靠人。电话稀罕，传话靠人跑。"),
-        WorldPreset(name: "末世废土", text: "灾变以后。城市烂了，没水没电，净水和汽油比钱贵，路上有匪帮和哨卡。有车有枪才说得上话，谁守着一口井谁就是这儿的王。"),
-        WorldPreset(name: "灵异民俗", text: "南方乡下和旧镇。祠堂、祖坟、神婆、丧事规矩、庙会、老宅。村规比法律管用，夜里不上山，不问名字，不信外人。")
-    ]
-
     // MARK: - 世界书槽位（母版 lib/project.js:4-14 阈值与权重照搬）
 
     static func slotBand(order: Int) -> String {

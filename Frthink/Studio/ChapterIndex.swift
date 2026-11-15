@@ -29,15 +29,29 @@ struct VolumeNode: Identifiable {
 enum ChapterIndex {
 
     /// 只认章（含序章/楔子/尾声/后记/番外），不认卷
-    static let chapterPattern = "^\\s*(第[零一二三四五六七八九十百千万两0-9]+[章节回]|序章|楔子|尾声|后记|番外(篇)?|Chapter\\s+\\d+).*$"
+    static let chapterPattern = "^\\s*(第[0-9０-９零一二三四五六七八九十百千万两]{1,8}[章节回]|序章|楔子|引子|尾声|后记|番外[篇]?|Chapter\\s*[0-9０-９]+|CHAPTER\\s+[0-9]+).*$"
 
     /// 只认卷/部/篇
-    static let volumePattern = "^\\s*(第[零一二三四五六七八九十百千万两0-9]+[卷部篇]|[上中下]卷|Volume\\s+\\d+|Part\\s+\\d+).*$"
+    static let volumePattern = "^\\s*(第[0-9０-９零一二三四五六七八九十百千万两]{1,8}[卷部篇]|[上中下]卷|Volume\\s*[0-9]+|Part\\s*[0-9]+).*$"
 
     private static func regex(_ pattern: String) -> NSRegularExpression {
         (try? NSRegularExpression(pattern: pattern,
                                   options: [.anchorsMatchLines, .caseInsensitive]))
             ?? (try! NSRegularExpression(pattern: "^$", options: [.anchorsMatchLines]))
+    }
+
+    /// 像不像一个标题行：太长的、句子式（标点多）的、空白的都不算。
+    /// 这一层过滤是"划分不准"的主要修法——正则只能认出前缀，长度与标点才分得清正文。
+    static func isPlausibleTitle(_ raw: String, limit: Int) -> Bool {
+        let t = raw.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { return false }
+        if t.count > limit { return false }
+        let sentenceMarks = t.filter { "，。；！？,!?;".contains($0) }.count
+        if sentenceMarks >= 2 { return false }
+        // 纯数字/纯符号不算标题
+        let meaningful = t.filter { $0.isLetter || $0.isNumber || $0 == "章" || $0 == "节" }
+        if meaningful.count < 2 { return false }
+        return true
     }
 
     /// 全文扫描：一次拿到章 + 卷，按出现顺序建树
@@ -48,11 +62,11 @@ enum ChapterIndex {
         var marks: [(offset: Int, title: String, isVolume: Bool)] = []
         for m in regex(chapterPattern).matches(in: text, range: full) {
             let t = ns.substring(with: m.range).trimmingCharacters(in: .whitespaces)
-            marks.append((m.range.location, t, false))
+            if isPlausibleTitle(t, limit: 44) { marks.append((m.range.location, t, false)) }
         }
         for m in regex(volumePattern).matches(in: text, range: full) {
             let t = ns.substring(with: m.range).trimmingCharacters(in: .whitespaces)
-            marks.append((m.range.location, t, true))
+            if isPlausibleTitle(t, limit: 30) { marks.append((m.range.location, t, true)) }
         }
         marks.sort { $0.offset < $1.offset }
 

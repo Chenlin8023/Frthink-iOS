@@ -16,6 +16,13 @@ struct ManuscriptEditorView: View {
     @Environment(\.modelContext) private var context
 
     @State private var lastSaved = Date.now
+    @State private var cachedWords = 0
+    @State private var cachedChapters = 0
+
+    private func refreshDerived() {
+        cachedWords = project.body.count
+        cachedChapters = AnalysisScope.chapterCount(beforeAnchorOf: project)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -24,7 +31,7 @@ struct ManuscriptEditorView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "anchor")
                         .font(.caption)
-                    Text("续写锚：第 \(anchor) 字 · 锚前 \(AnalysisScope.chapterCount(beforeAnchorOf: project)) 章")
+                    Text("续写锚：第 \(anchor) 字 · 锚前 \(cachedChapters) 章")
                         .font(.caption)
                     Spacer()
                     Button("调整") { anchorSheet = true }
@@ -43,7 +50,7 @@ struct ManuscriptEditorView: View {
 
             // 底部状态栏
             HStack(spacing: 14) {
-                Text("\(project.wordCount) 字").monospacedDigit()
+                Text("\(cachedWords) 字").monospacedDigit()
                 if project.anchorOffset == nil {
                     Button {
                         anchorSheet = true
@@ -73,7 +80,9 @@ struct ManuscriptEditorView: View {
                 Spacer()
             }
         }
+        .onAppear(perform: refreshDerived)
         .onChange(of: project.body) { _, _ in
+            refreshDerived()
             lastSaved = .now
             if UInt.random(in: 0..<8) == 0 { try? context.save() } // 节流自动保存
         }
@@ -270,9 +279,10 @@ struct DocumentPicker: UIViewControllerRepresentable {
     }
 }
 
-/// 编辑器文本视图（轻量封装，便于后续替换为富文本/CodeMirror 方案）
 /// 正文编辑器：UIKit UITextView 包装。
-/// 与纯 SwiftUI TextEditor 的区别只有一个 —— 支持按字符偏移跳转（目录点章后正文滚到该处）。
+/// 相对 SwiftUI TextEditor 的两点必要能力：
+///   1. 按字符偏移跳转（目录点章后正文滚到该处）；
+///   2. 输入防抖 —— 每敲一个字都写 SwiftData 会连带触发全书重算，十万字以上明显卡顿。
 struct EditorTextEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var jumpOffset: Int?
@@ -293,20 +303,40 @@ struct EditorTextEditor: UIViewRepresentable {
 
     func updateUIView(_ tv: UITextView, context: Context) {
         context.coordinator.parent = self
-        if tv.text != text { tv.text = text }
+        // 有未提交的输入时不要回写，否则会把用户刚敲的字覆盖成旧值
+        if !context.coordinator.hasPending && tv.text != text {
+            tv.text = text
+        }
         guard let offset = jumpOffset else { return }
         let ns = tv.text as NSString
         let loc = min(max(offset, 0), ns.length)
-        let range = NSRange(location: loc, length: 0)
-        tv.scrollRangeToVisible(range)
+        tv.scrollRangeToVisible(NSRange(location: loc, length: 0))
         DispatchQueue.main.async { self.jumpOffset = nil }
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: EditorTextEditor
+        private var pending: DispatchWorkItem?
+
+        var hasPending: Bool { pending != nil }
+
         init(_ parent: EditorTextEditor) { self.parent = parent }
+
         func textViewDidChange(_ textView: UITextView) {
-            parent.text = textView.text
+            pending?.cancel()
+            let snapshot = textView.text ?? ""
+            let item = DispatchWorkItem { [weak self] in
+                self?.parent.text = snapshot
+                self?.pending = nil
+            }
+            pending = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: item)
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            pending?.cancel()
+            pending = nil
+            parent.text = textView.text ?? ""
         }
     }
 }

@@ -13,7 +13,7 @@ struct FrthinkApp: App {
             container = try ModelContainer(
                 for: BookProject.self, ChatMessage.self, CharacterCard.self,
                 WorldEntry.self, CorpusEntry.self, WritingRule.self,
-                PlotEvent.self, BodySnapshot.self, UsageRecord.self,
+                PlotEvent.self, BodySnapshot.self, UsageRecord.self, WritingSession.self,
                 migrationPlan: nil
             )
         } catch {

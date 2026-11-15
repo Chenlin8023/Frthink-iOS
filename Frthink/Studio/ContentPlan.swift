@@ -169,14 +169,4 @@ struct ContentPlan {
     }
 
     /// 应用基调预设（一次写入 tone / cadence / 维度集；opts 由调用方决定是否写进章节 tags）
-    mutating func applyPreset(_ preset: ContentKit.TonePreset) {
-        tone = preset.tone
-        cadenceStart = preset.cadenceStart
-        cadenceEvery = preset.cadenceEvery
-        if preset.dimSet != dimSet {
-            var current: [String: Int] = [:]
-            for d in dims { current[d.n] = d.initial }
-            switchDims(to: preset.dimSet, keepFrom: current)
-        }
-    }
 }
